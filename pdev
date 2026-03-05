@@ -146,9 +146,9 @@ pick_with_select() {
     IFS=':' read -r name emoji desc <<< "$cmd"
     local trimmed="${name#"${name%%[![:space:]]*}"}"
     if [[ "$name" == " "* ]]; then
-      printf "  ${MUTED}[%d]${NC}     ${BOLD}%-18s${NC} %s\n" "$i" "$trimmed" "$desc"
+      printf "       ${BOLD}%-18s${NC} ${MUTED}%s${NC} ${MUTED}[%d]${NC}\n" "$trimmed" "$desc" "$i"
     else
-      printf "  ${MUTED}[%d]${NC} ${SUCCESS}%s${NC} ${BOLD}%-18s${NC} %s\n" "$i" "$emoji" "$trimmed" "$desc"
+      printf "  ${SUCCESS}%s${NC} ${BOLD}%-18s${NC} ${MUTED}%s${NC} ${MUTED}[%d]${NC}\n" "$emoji" "$trimmed" "$desc" "$i"
     fi
     names+=("$trimmed")
     i=$((i + 1))
