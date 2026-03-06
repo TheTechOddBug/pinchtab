@@ -22,9 +22,9 @@ import (
 //	Tab2 ─── sequential actions ───►  (concurrent across tabs)
 //	Tab3 ─── sequential actions ───►
 type TabExecutor struct {
-	semaphore   chan struct{}    // limits concurrent tab executions
+	semaphore   chan struct{}          // limits concurrent tab executions
 	tabLocks    map[string]*sync.Mutex // per-tab sequential execution
-	mu          sync.Mutex      // protects tabLocks map
+	mu          sync.Mutex             // protects tabLocks map
 	maxParallel int
 }
 
@@ -154,7 +154,10 @@ func (te *TabExecutor) RemoveTab(tabID string) {
 	delete(te.tabLocks, tabID)
 	te.mu.Unlock()
 
-	// Wait for any in-flight task to finish, then release.
+	// Wait for any in-flight task to finish.
+	// This empty critical section is intentional — it blocks until the mutex
+	// is available, ensuring the active task completes before RemoveTab returns.
+	//nolint:staticcheck // SA2001: intentional wait for mutex availability
 	m.Lock()
 	m.Unlock()
 }
