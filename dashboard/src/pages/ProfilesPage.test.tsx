@@ -125,7 +125,9 @@ describe("ProfilesPage", () => {
     const detailPanel = screen
       .getByRole("heading", { name: "alpha" })
       .closest(".dashboard-panel") as HTMLElement;
-    const saveButton = within(detailPanel).getByRole("button", { name: "Save" });
+    const saveButton = within(detailPanel).getByRole("button", {
+      name: "Save",
+    });
     const nameInput = within(detailPanel).getByDisplayValue("alpha");
 
     expect(saveButton).toBeDisabled();

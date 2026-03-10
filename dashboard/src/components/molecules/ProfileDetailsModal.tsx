@@ -59,9 +59,9 @@ export default function ProfileDetailsModal({
         ? allTabs.filter((t) => t.instanceId === instance.id)
         : [];
       setTabs(instanceTabs);
-      const instanceLogs = await api.fetchInstanceLogs(instance.id).catch(
-        () => "",
-      );
+      const instanceLogs = await api
+        .fetchInstanceLogs(instance.id)
+        .catch(() => "");
       setLogs(instanceLogs);
     } catch (e) {
       console.error("Failed to load live data", e);

@@ -265,7 +265,9 @@ export default function ProfileDetailsPanel({
                     <span className="dashboard-section-title text-[0.68rem]">
                       Status
                     </span>
-                    <span className="text-right">{instance?.status || "stopped"}</span>
+                    <span className="text-right">
+                      {instance?.status || "stopped"}
+                    </span>
                   </div>
                   {instance?.port && (
                     <div className="flex items-center justify-between gap-3">

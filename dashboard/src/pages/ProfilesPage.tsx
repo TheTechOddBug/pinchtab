@@ -240,7 +240,9 @@ export default function ProfilesPage() {
                     <h3 className="text-sm font-semibold text-text-secondary">
                       Profiles ({profiles.length})
                     </h3>
-                    <Badge variant={runningProfiles > 0 ? "success" : "default"}>
+                    <Badge
+                      variant={runningProfiles > 0 ? "success" : "default"}
+                    >
                       {runningProfiles} running
                     </Badge>
                   </div>
@@ -273,7 +275,9 @@ export default function ProfilesPage() {
                         <button
                           key={getProfileKey(profile)}
                           type="button"
-                          onClick={() => setSelectedProfileKey(getProfileKey(profile))}
+                          onClick={() =>
+                            setSelectedProfileKey(getProfileKey(profile))
+                          }
                           className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
                             isSelected
                               ? "dashboard-panel-selected border-primary"
@@ -447,7 +451,6 @@ export default function ProfilesPage() {
           </div>
         </div>
       </Modal>
-
     </div>
   );
 }
