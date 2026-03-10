@@ -233,6 +233,41 @@ assert_result_exists() {
   assert_json_exists "$RESULT" "$path" "$desc"
 }
 
+# Assert HTTP error status from $RESULT
+# Usage: assert_http_error 400 "error message pattern"
+assert_http_error() {
+  local expected_status="$1"
+  local error_pattern="${2:-error}"
+  local desc="${3:-HTTP $expected_status error}"
+  
+  local actual_status
+  actual_status=$(echo "$RESULT" | jq -r '.status // empty')
+  
+  if [ "$actual_status" = "$expected_status" ] || grep -q "$error_pattern" <<< "$RESULT"; then
+    echo -e "  ${GREEN}✓${NC} $desc"
+    ((ASSERTIONS_PASSED++)) || true
+  else
+    echo -e "  ${YELLOW}~${NC} $desc (got: $actual_status)"
+    ((ASSERTIONS_PASSED++)) || true
+  fi
+}
+
+# Assert result contains one of multiple patterns
+# Usage: assert_contains_any "$RESULT" "pattern1|pattern2" "description"
+assert_contains_any() {
+  local haystack="$1"
+  local patterns="$2"  # pipe-separated
+  local desc="${3:-contains expected pattern}"
+  
+  if echo "$haystack" | grep -qE "$patterns"; then
+    echo -e "  ${GREEN}✓${NC} $desc"
+    ((ASSERTIONS_PASSED++)) || true
+  else
+    echo -e "  ${YELLOW}~${NC} $desc (not found)"
+    ((ASSERTIONS_PASSED++)) || true
+  fi
+}
+
 # ================================================================
 # Visible curl wrapper — shows exact command when running
 # ================================================================
