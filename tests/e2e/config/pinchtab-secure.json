@@ -7,8 +7,7 @@
     "extraFlags": "--no-sandbox --disable-dev-shm-usage"
   },
   "instanceDefaults": {
-    "maxTabs": 2,
-    "tabEvictionPolicy": "close_lru"
+    "maxTabs": 2
   },
   "security": {
     "allowEvaluate": false,
