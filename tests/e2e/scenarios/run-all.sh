@@ -14,8 +14,8 @@ echo "FIXTURES_URL: ${FIXTURES_URL}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-wait_for_strategy_running "${PINCHTAB_URL}" "/always-on/status"
-wait_for_strategy_running "${PINCHTAB_SECURE_URL}" "/always-on/status"
+wait_for_instance_ready "${PINCHTAB_URL}"
+wait_for_instance_ready "${PINCHTAB_SECURE_URL}"
 echo ""
 
 # Find and run all test scripts in order

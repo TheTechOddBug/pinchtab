@@ -42,16 +42,22 @@ type tokenEnvelope struct {
 	Token string `json:"token"`
 }
 
+type healthInstanceInfo struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
 type healthEnvelope struct {
-	Status          string   `json:"status"`
-	Mode            string   `json:"mode"`
-	Version         string   `json:"version"`
-	Uptime          int64    `json:"uptime"`
-	Profiles        int      `json:"profiles"`
-	Instances       int      `json:"instances"`
-	Agents          int      `json:"agents"`
-	RestartRequired bool     `json:"restartRequired"`
-	RestartReasons  []string `json:"restartReasons,omitempty"`
+	Status          string              `json:"status"`
+	Mode            string              `json:"mode"`
+	Version         string              `json:"version"`
+	Uptime          int64               `json:"uptime"`
+	Profiles        int                 `json:"profiles"`
+	Instances       int                 `json:"instances"`
+	DefaultInstance *healthInstanceInfo `json:"defaultInstance,omitempty"`
+	Agents          int                 `json:"agents"`
+	RestartRequired bool                `json:"restartRequired"`
+	RestartReasons  []string            `json:"restartReasons,omitempty"`
 }
 
 func NewConfigAPI(
@@ -181,8 +187,16 @@ func (c *ConfigAPI) healthInfo() (healthEnvelope, error) {
 	}
 
 	instanceCount := 0
+	var defaultInst *healthInstanceInfo
 	if c.instances != nil {
-		instanceCount = len(c.instances.List())
+		instances := c.instances.List()
+		instanceCount = len(instances)
+		if len(instances) > 0 {
+			defaultInst = &healthInstanceInfo{
+				ID:     instances[0].ID,
+				Status: instances[0].Status,
+			}
+		}
 	}
 	return healthEnvelope{
 		Status:          "ok",
@@ -191,6 +205,7 @@ func (c *ConfigAPI) healthInfo() (healthEnvelope, error) {
 		Uptime:          int64(time.Since(c.startedAt).Milliseconds()),
 		Profiles:        profileCount,
 		Instances:       instanceCount,
+		DefaultInstance: defaultInst,
 		Agents:          0,
 		RestartRequired: len(restartReasons) > 0,
 		RestartReasons:  restartReasons,
