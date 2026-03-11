@@ -213,22 +213,21 @@ func (tm *TabManager) CreateTab(url string) (string, context.Context, context.Ca
 	}
 
 	if tm.config.MaxTabs > 0 {
-		// Use a short timeout for tab count check to avoid hanging under load
-		checkCtx, checkCancel := context.WithTimeout(tm.browserCtx, 3*time.Second)
-		targets, err := tm.ListTargetsWithContext(checkCtx)
-		checkCancel()
+		// Count managed tabs for eviction decisions. Using Chrome's target list
+		// would include unmanaged targets (e.g. the initial about:blank tab),
+		// causing premature eviction of managed tabs.
+		tm.mu.RLock()
+		managedCount := len(tm.tabs)
+		tm.mu.RUnlock()
 
-		if err != nil {
-			// If check fails due to timeout, log warning but allow creation to proceed
-			slog.Warn("tab count check timed out, proceeding with creation", "error", err)
-		} else if len(targets) >= tm.config.MaxTabs {
+		if managedCount >= tm.config.MaxTabs {
 			switch tm.config.TabEvictionPolicy {
 			case "close_oldest":
 				if evictErr := tm.closeOldestTab(); evictErr != nil {
 					return "", nil, nil, fmt.Errorf("eviction failed: %w", evictErr)
 				}
 			case "reject":
-				return "", nil, nil, &TabLimitError{Current: len(targets), Max: tm.config.MaxTabs}
+				return "", nil, nil, &TabLimitError{Current: managedCount, Max: tm.config.MaxTabs}
 			default: // "close_lru" (default)
 				if evictErr := tm.closeLRUTab(); evictErr != nil {
 					return "", nil, nil, fmt.Errorf("eviction failed: %w", evictErr)
