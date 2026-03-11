@@ -1,0 +1,429 @@
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
+)
+
+// maxWaitMS caps wait/timeout durations for safety.
+const maxWaitMS = 30_000
+
+// handlerMap returns a name→handler map for all PinchTab MCP tools.
+func handlerMap(c *Client) map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error){
+		// Navigation
+		"pinchtab_navigate":   handleNavigate(c),
+		"pinchtab_snapshot":   handleSnapshot(c),
+		"pinchtab_screenshot": handleScreenshot(c),
+		"pinchtab_get_text":   handleGetText(c),
+
+		// Interaction
+		"pinchtab_click":  handleAction(c, "click"),
+		"pinchtab_type":   handleAction(c, "type"),
+		"pinchtab_press":  handleAction(c, "press"),
+		"pinchtab_hover":  handleAction(c, "hover"),
+		"pinchtab_focus":  handleAction(c, "focus"),
+		"pinchtab_select": handleAction(c, "select"),
+		"pinchtab_scroll": handleAction(c, "scroll"),
+		"pinchtab_fill":   handleAction(c, "fill"),
+
+		// Content
+		"pinchtab_eval": handleEval(c),
+		"pinchtab_pdf":  handlePDF(c),
+		"pinchtab_find": handleFind(c),
+
+		// Tab management
+		"pinchtab_list_tabs": handleListTabs(c),
+		"pinchtab_close_tab": handleCloseTab(c),
+		"pinchtab_health":    handleHealth(c),
+		"pinchtab_cookies":   handleCookies(c),
+
+		// Utility
+		"pinchtab_wait":              handleWait(),
+		"pinchtab_wait_for_selector": handleWaitForSelector(c),
+	}
+}
+
+// ── helpers ────────────────────────────────────────────────────────────
+
+func optString(r mcp.CallToolRequest, key string) string {
+	v, _ := r.GetArguments()[key].(string)
+	return v
+}
+
+func optFloat(r mcp.CallToolRequest, key string) (float64, bool) {
+	v, ok := r.GetArguments()[key].(float64)
+	return v, ok
+}
+
+func optBool(r mcp.CallToolRequest, key string) (bool, bool) {
+	v, ok := r.GetArguments()[key].(bool)
+	return v, ok
+}
+
+func resultFromBytes(body []byte, code int) (*mcp.CallToolResult, error) {
+	if code >= 400 {
+		return mcp.NewToolResultError(fmt.Sprintf("HTTP %d: %s", code, string(body))), nil
+	}
+	return mcp.NewToolResultText(string(body)), nil
+}
+
+// ── Navigation handlers ────────────────────────────────────────────────
+
+func handleNavigate(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		u, err := r.RequireString("url")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		parsed, err := url.Parse(u)
+		if err != nil || !strings.HasPrefix(parsed.Scheme, "http") {
+			return mcp.NewToolResultError("invalid URL: must start with http:// or https://"), nil
+		}
+		payload := map[string]any{"url": u}
+		if tabID := optString(r, "tabId"); tabID != "" {
+			payload["tabId"] = tabID
+		}
+		body, code, err := c.Post(ctx, "/navigate", payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+func handleSnapshot(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		q := url.Values{}
+		if tabID := optString(r, "tabId"); tabID != "" {
+			q.Set("tabId", tabID)
+		}
+		if v, ok := optBool(r, "interactive"); ok && v {
+			q.Set("interactive", "true")
+		}
+		if v, ok := optBool(r, "compact"); ok && v {
+			q.Set("compact", "true")
+		}
+		if v, ok := optBool(r, "diff"); ok && v {
+			q.Set("diff", "true")
+		}
+		if sel := optString(r, "selector"); sel != "" {
+			q.Set("selector", sel)
+		}
+		body, code, err := c.Get(ctx, "/snapshot", q)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+func handleScreenshot(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		q := url.Values{}
+		if tabID := optString(r, "tabId"); tabID != "" {
+			q.Set("tabId", tabID)
+		}
+		if quality, ok := optFloat(r, "quality"); ok {
+			q.Set("quality", fmt.Sprintf("%d", int(quality)))
+		}
+		body, code, err := c.Get(ctx, "/screenshot", q)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+func handleGetText(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		q := url.Values{}
+		if tabID := optString(r, "tabId"); tabID != "" {
+			q.Set("tabId", tabID)
+		}
+		if v, ok := optBool(r, "raw"); ok && v {
+			q.Set("mode", "raw")
+		}
+		body, code, err := c.Get(ctx, "/text", q)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+// ── Interaction handlers ───────────────────────────────────────────────
+
+func handleAction(c *Client, kind string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := map[string]any{"kind": kind}
+
+		if tabID := optString(r, "tabId"); tabID != "" {
+			payload["tabId"] = tabID
+		}
+
+		switch kind {
+		case "click", "hover", "focus":
+			ref, err := r.RequireString("ref")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			payload["ref"] = ref
+
+		case "type":
+			ref, err := r.RequireString("ref")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			text, err := r.RequireString("text")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			payload["ref"] = ref
+			payload["text"] = text
+
+		case "press":
+			key, err := r.RequireString("key")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			payload["key"] = key
+
+		case "select":
+			ref, err := r.RequireString("ref")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			value, err := r.RequireString("value")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			payload["ref"] = ref
+			payload["value"] = value
+
+		case "scroll":
+			if ref := optString(r, "ref"); ref != "" {
+				payload["ref"] = ref
+			}
+			if px, ok := optFloat(r, "pixels"); ok {
+				payload["scrollY"] = int(px)
+			}
+
+		case "fill":
+			ref, err := r.RequireString("ref")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			value, err := r.RequireString("value")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			payload["ref"] = ref
+			payload["value"] = value
+		}
+
+		body, code, err := c.Post(ctx, "/action", payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+// ── Content handlers ───────────────────────────────────────────────────
+
+func handleEval(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		expr, err := r.RequireString("expression")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		payload := map[string]any{"expression": expr}
+		if tabID := optString(r, "tabId"); tabID != "" {
+			payload["tabId"] = tabID
+		}
+		body, code, err := c.Post(ctx, "/evaluate", payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+func handlePDF(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		q := url.Values{}
+		if tabID := optString(r, "tabId"); tabID != "" {
+			q.Set("tabId", tabID)
+		}
+		if v, ok := optBool(r, "landscape"); ok && v {
+			q.Set("landscape", "true")
+		}
+		if scale, ok := optFloat(r, "scale"); ok {
+			q.Set("scale", fmt.Sprintf("%.2f", scale))
+		}
+		if pr := optString(r, "pageRanges"); pr != "" {
+			q.Set("pageRanges", pr)
+		}
+		body, code, err := c.Get(ctx, "/pdf", q)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+func handleFind(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		query, err := r.RequireString("query")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		payload := map[string]any{"query": query}
+		if tabID := optString(r, "tabId"); tabID != "" {
+			payload["tabId"] = tabID
+		}
+		body, code, err := c.Post(ctx, "/find", payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+// ── Tab management handlers ────────────────────────────────────────────
+
+func handleListTabs(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		body, code, err := c.Get(ctx, "/tabs", nil)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+func handleCloseTab(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := map[string]any{"action": "close"}
+		if tabID := optString(r, "tabId"); tabID != "" {
+			payload["tabId"] = tabID
+		}
+		body, code, err := c.Post(ctx, "/tab", payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+func handleHealth(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		body, code, err := c.Get(ctx, "/health", nil)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+func handleCookies(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		q := url.Values{}
+		if tabID := optString(r, "tabId"); tabID != "" {
+			q.Set("tabId", tabID)
+		}
+		body, code, err := c.Get(ctx, "/cookies", q)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultFromBytes(body, code)
+	}
+}
+
+// ── Utility handlers ───────────────────────────────────────────────────
+
+func handleWait() func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		ms, err := r.RequireFloat("ms")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if ms < 0 {
+			ms = 0
+		}
+		if ms > maxWaitMS {
+			ms = maxWaitMS
+		}
+		select {
+		case <-time.After(time.Duration(ms) * time.Millisecond):
+			return mcp.NewToolResultText(fmt.Sprintf(`{"waited_ms":%d}`, int(ms))), nil
+		case <-ctx.Done():
+			return mcp.NewToolResultError("wait cancelled"), nil
+		}
+	}
+}
+
+func handleWaitForSelector(c *Client) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		selector, err := r.RequireString("selector")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		timeoutMS := 10000.0
+		if t, ok := optFloat(r, "timeout"); ok {
+			timeoutMS = t
+		}
+		if timeoutMS > maxWaitMS {
+			timeoutMS = maxWaitMS
+		}
+		if timeoutMS < 100 {
+			timeoutMS = 100
+		}
+
+		// JavaScript that checks for the selector
+		js := fmt.Sprintf(`document.querySelector(%s) !== null`, jsonString(selector))
+
+		payload := map[string]any{"expression": js}
+		if tabID := optString(r, "tabId"); tabID != "" {
+			payload["tabId"] = tabID
+		}
+
+		deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
+		interval := 250 * time.Millisecond
+
+		for {
+			body, code, err := c.Post(ctx, "/evaluate", payload)
+			if err == nil && code < 400 {
+				var resp struct {
+					Result any `json:"result"`
+				}
+				if json.Unmarshal(body, &resp) == nil && resp.Result == true {
+					return mcp.NewToolResultText(fmt.Sprintf(`{"found":true,"selector":%s}`, jsonString(selector))), nil
+				}
+			}
+
+			if time.Now().After(deadline) {
+				return mcp.NewToolResultError(fmt.Sprintf("timeout: selector %q not found within %dms", selector, int(timeoutMS))), nil
+			}
+
+			select {
+			case <-time.After(interval):
+			case <-ctx.Done():
+				return mcp.NewToolResultError("wait_for_selector cancelled"), nil
+			}
+		}
+	}
+}
+
+// jsonString returns a JSON-encoded string (with quotes).
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}

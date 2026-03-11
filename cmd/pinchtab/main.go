@@ -54,6 +54,11 @@ func main() {
 		os.Exit(0)
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		runMCP(cfg)
+		return
+	}
+
 	// CLI commands
 	if len(os.Args) > 1 && isCLICommand(os.Args[1]) {
 		runCLI(cfg)

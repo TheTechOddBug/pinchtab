@@ -23,6 +23,7 @@ MODES:
   pinchtab                  Start full server (default)
   pinchtab server           Start full server explicitly
   pinchtab bridge           Start single-instance bridge-only server
+  pinchtab mcp              Start MCP (Model Context Protocol) server on stdio
   pinchtab connect <name>   Get URL for a running profile
   pinchtab security         Review runtime security posture
 

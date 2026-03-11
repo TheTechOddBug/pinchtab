@@ -26,3 +26,7 @@ Note: this index is generated and should be checked against the code when comman
 - [Tabs](./tabs.md)
 - [Text](./text.md)
 - [Type](./type.md)
+
+## MCP Tools
+
+- [MCP Tool Reference](./mcp-tools.md)
