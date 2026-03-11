@@ -6,6 +6,10 @@
 
 source "$(dirname "$0")/common.sh"
 
+# Use permissive instance (needs evaluate enabled)
+# Previous test (24-tab-eviction-lru) switches to secure and doesn't reset
+PINCHTAB_URL="http://pinchtab:9999"
+
 # ─────────────────────────────────────────────────────────────────
 start_test "press Enter: submits form (not types 'Enter')"
 
@@ -25,12 +29,13 @@ assert_ok "press Enter"
 sleep 0.5
 
 # Check that "Form submitted!" appears (proves Enter triggered submit)
-pt_get /snapshot
-if echo "$RESULT" | grep -q "Form submitted"; then
+pt_post /evaluate -d '{"expression":"document.getElementById(\"result\").textContent"}'
+RESULT_TEXT=$(echo "$RESULT" | jq -r '.result // empty')
+if echo "$RESULT_TEXT" | grep -q "Form submitted"; then
   echo -e "  ${GREEN}✓${NC} form was submitted (Enter key worked)"
   ((ASSERTIONS_PASSED++)) || true
 else
-  echo -e "  ${RED}✗${NC} form was NOT submitted - Enter may have typed as text"
+  echo -e "  ${RED}✗${NC} form was NOT submitted (result: '$RESULT_TEXT')"
   ((ASSERTIONS_FAILED++)) || true
 fi
 
