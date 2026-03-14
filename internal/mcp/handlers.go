@@ -39,10 +39,10 @@ func handlerMap(c *Client) map[string]func(context.Context, mcp.CallToolRequest)
 		"pinchtab_find": handleFind(c),
 
 		// Tab management
-		"pinchtab_list_tabs": handleListTabs(c),
-		"pinchtab_close_tab": handleCloseTab(c),
-		"pinchtab_health":    handleHealth(c),
-		"pinchtab_cookies":   handleCookies(c),
+		"pinchtab_list_tabs":       handleListTabs(c),
+		"pinchtab_close_tab":       handleCloseTab(c),
+		"pinchtab_health":          handleHealth(c),
+		"pinchtab_cookies":         handleCookies(c),
 		"pinchtab_connect_profile": handleConnectProfile(c),
 
 		// Utility
