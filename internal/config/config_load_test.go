@@ -59,8 +59,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.AllowEvaluate {
 		t.Errorf("default AllowEvaluate = %v, want false", cfg.AllowEvaluate)
 	}
-	if cfg.Strategy != "simple" {
-		t.Errorf("default Strategy = %v, want simple", cfg.Strategy)
+	if cfg.Strategy != "always-on" {
+		t.Errorf("default Strategy = %v, want always-on", cfg.Strategy)
 	}
 	if cfg.AllocationPolicy != "fcfs" {
 		t.Errorf("default AllocationPolicy = %v, want fcfs", cfg.AllocationPolicy)
@@ -68,8 +68,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.TabEvictionPolicy != "close_lru" {
 		t.Errorf("default TabEvictionPolicy = %v, want close_lru", cfg.TabEvictionPolicy)
 	}
-	if cfg.AttachEnabled {
-		t.Errorf("default AttachEnabled = %v, want false", cfg.AttachEnabled)
+	if !cfg.AttachEnabled {
+		t.Errorf("default AttachEnabled = %v, want true", cfg.AttachEnabled)
 	}
 	if len(cfg.AttachAllowSchemes) != 2 || cfg.AttachAllowSchemes[0] != "ws" || cfg.AttachAllowSchemes[1] != "wss" {
 		t.Errorf("default AttachAllowSchemes = %v, want [ws wss]", cfg.AttachAllowSchemes)
@@ -171,6 +171,46 @@ func TestEnvOverridesNestedConfig(t *testing.T) {
 	}
 	if cfg.Strategy != "explicit" {
 		t.Errorf("file should supply Strategy = %v, want explicit", cfg.Strategy)
+	}
+}
+
+func TestLoadConfigEngineFromFile(t *testing.T) {
+	clearConfigEnvVars(t)
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	_ = os.Setenv("PINCHTAB_CONFIG", configPath)
+	defer func() { _ = os.Unsetenv("PINCHTAB_CONFIG") }()
+
+	if err := os.WriteFile(configPath, []byte(`{"server":{"engine":"lite"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Load()
+	if cfg.Engine != "lite" {
+		t.Fatalf("engine = %q, want lite", cfg.Engine)
+	}
+}
+
+func TestLoadConfigEngineEnvOverridesFile(t *testing.T) {
+	clearConfigEnvVars(t)
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	_ = os.Setenv("PINCHTAB_CONFIG", configPath)
+	_ = os.Setenv("PINCHTAB_ENGINE", "auto")
+	defer func() {
+		_ = os.Unsetenv("PINCHTAB_CONFIG")
+		_ = os.Unsetenv("PINCHTAB_ENGINE")
+	}()
+
+	if err := os.WriteFile(configPath, []byte(`{"server":{"engine":"lite"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Load()
+	if cfg.Engine != "auto" {
+		t.Fatalf("engine = %q, want auto", cfg.Engine)
 	}
 }
 

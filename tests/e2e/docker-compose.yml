@@ -9,6 +9,8 @@ services:
       PINCHTAB_PORT: "9999"
     volumes:
       - ./config/pinchtab.json:/config/pinchtab.json:ro
+      - ./fixtures/test-extension:/extensions/test-extension
+      - ./fixtures/test-extension-api:/extensions/test-extension-api
     ports:
       - "9999:9999"
     # Chrome needs more shared memory in Docker
@@ -40,6 +42,26 @@ services:
       retries: 20
       start_period: 15s
 
+  # Lite engine instance: no Chrome, DOM-only (bridge mode)
+  pinchtab-lite:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      PINCHTAB_CONFIG: /config/pinchtab-lite.json
+      PINCHTAB_PORT: "9999"
+    volumes:
+      - ./config/pinchtab-lite.json:/config/pinchtab-lite.json:ro
+    ports:
+      - "9997:9999"
+    command: ["/usr/local/bin/pinchtab", "bridge"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9999/health"]
+      interval: 3s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+
   fixtures:
     image: nginx:alpine
     volumes:
@@ -58,13 +80,17 @@ services:
         condition: service_healthy
       pinchtab-secure:
         condition: service_healthy
+      pinchtab-lite:
+        condition: service_healthy
       fixtures:
         condition: service_healthy
     environment:
       - PINCHTAB_URL=http://pinchtab:9999
       - PINCHTAB_SECURE_URL=http://pinchtab-secure:9999
+      - PINCHTAB_LITE_URL=http://pinchtab-lite:9999
       - FIXTURES_URL=http://fixtures:80
     volumes:
       - ./scenarios:/scenarios:ro
+      - ./scenarios-recent:/scenarios-recent:ro
       - ./results:/results
     command: ["/scenarios/run-all.sh"]

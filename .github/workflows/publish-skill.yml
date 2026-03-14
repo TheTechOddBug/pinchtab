@@ -1,13 +1,22 @@
 name: Publish Skill
 
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    secrets:
+      CLAWHUB_TOKEN:
+        required: true
   workflow_dispatch:
     inputs:
       version:
         description: 'Skill version (e.g. 0.2.0, without v prefix)'
         required: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   contents: read
@@ -17,9 +26,9 @@ jobs:
     name: Publish to ClawHub
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
 
@@ -33,12 +42,15 @@ jobs:
 
       - name: Publish skill
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
             VERSION="${{ github.event.inputs.version }}"
           else
             VERSION=${GITHUB_REF_NAME#v}
           fi
-          clawhub publish skill/pinchtab \
+          VERSION=${VERSION#v}
+          clawhub publish skills/pinchtab \
             --slug pinchtab \
             --name "Pinchtab" \
             --version "$VERSION" \

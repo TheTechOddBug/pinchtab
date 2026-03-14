@@ -14,6 +14,7 @@ echo "FIXTURES_URL: ${FIXTURES_URL}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
+echo "Waiting for instances to become ready..."
 wait_for_instance_ready "${PINCHTAB_URL}"
 wait_for_instance_ready "${PINCHTAB_SECURE_URL}"
 echo ""
