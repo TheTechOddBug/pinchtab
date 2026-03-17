@@ -6,8 +6,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/pinchtab/pinchtab/internal/bridge"
 	"github.com/pinchtab/pinchtab/internal/config"
 )
 
@@ -60,6 +62,11 @@ func TestValidateDownloadURL(t *testing.T) {
 		{"localhost", "http://localhost:8080/secret", true},
 		{"loopback ipv4", "http://127.0.0.1/secret", true},
 		{"loopback ipv6", "http://[::1]/secret", true},
+		{"private ipv4 literal", "http://192.168.1.10/secret", true},
+		{"shared address space", "http://100.64.0.1/secret", true},
+		{"benchmark network", "http://198.18.0.1/secret", true},
+		{"cloud metadata", "http://169.254.169.254/latest/meta-data", true},
+		{"localhost suffix", "http://foo.localhost/secret", true},
 		{"empty scheme", "://pinchtab.com", true},
 		{"no scheme", "pinchtab.com", true},
 	}
@@ -79,6 +86,10 @@ func TestHandleDownload_SSRFBlocked(t *testing.T) {
 		"file:///etc/passwd",
 		"http://localhost:8080",
 		"http://127.0.0.1/admin",
+		"http://192.168.1.10/admin",
+		"http://100.64.0.1/admin",
+		"http://198.18.0.1/admin",
+		"http://169.254.169.254/latest/meta-data",
 	}
 	for _, u := range urls {
 		req := httptest.NewRequest("GET", "/download?url="+u, nil)
@@ -118,5 +129,50 @@ func TestHandleDownload_Disabled(t *testing.T) {
 	h.HandleDownload(w, req)
 	if w.Code != 403 {
 		t.Errorf("expected 403 when download disabled, got %d", w.Code)
+	}
+}
+
+func TestDownloadRequestGuard_BlocksBrowserSideRequests(t *testing.T) {
+	originalResolver := resolveDownloadHostIPs
+	t.Cleanup(func() {
+		resolveDownloadHostIPs = originalResolver
+	})
+	resolveDownloadHostIPs = func(ctx context.Context, network, host string) ([]net.IP, error) {
+		switch host {
+		case "pinchtab.com":
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		default:
+			return nil, errors.New("not found")
+		}
+	}
+
+	guard := newDownloadRequestGuard(newDownloadURLGuard(), -1)
+	err := guard.Validate("http://127.0.0.1:1337/increment", false)
+	if err == nil {
+		t.Fatal("expected browser-side localhost request to be blocked")
+	}
+	if !strings.Contains(err.Error(), "unsafe browser request") {
+		t.Fatalf("expected unsafe browser request error, got %v", err)
+	}
+}
+
+func TestDownloadRequestGuard_TracksRedirectLimits(t *testing.T) {
+	originalResolver := resolveDownloadHostIPs
+	t.Cleanup(func() {
+		resolveDownloadHostIPs = originalResolver
+	})
+	resolveDownloadHostIPs = func(ctx context.Context, network, host string) ([]net.IP, error) {
+		switch host {
+		case "pinchtab.com":
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		default:
+			return nil, errors.New("not found")
+		}
+	}
+
+	guard := newDownloadRequestGuard(newDownloadURLGuard(), 0)
+	err := guard.Validate("https://pinchtab.com/redirected", true)
+	if !errors.Is(err, bridge.ErrTooManyRedirects) {
+		t.Fatalf("expected too-many-redirects error, got %v", err)
 	}
 }

@@ -3,13 +3,16 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"sync/atomic"
@@ -26,9 +29,16 @@ var resolveDownloadHostIPs = func(ctx context.Context, network, host string) ([]
 	return net.DefaultResolver.LookupIP(ctx, network, host)
 }
 
-// validateDownloadURL blocks file://, internal hosts, private IPs, and cloud metadata.
-// Only public http/https URLs are allowed.
-func validateDownloadURL(rawURL string) error {
+var blockedDownloadPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("100.64.0.0/10"), // Carrier-grade NAT/shared address space.
+	netip.MustParsePrefix("198.18.0.0/15"), // Benchmark/testing networks.
+}
+
+type downloadURLGuard struct{}
+
+func newDownloadURLGuard() *downloadURLGuard { return &downloadURLGuard{} }
+
+func (g *downloadURLGuard) Validate(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL")
@@ -38,9 +48,13 @@ func validateDownloadURL(rawURL string) error {
 		return fmt.Errorf("only http/https schemes are allowed")
 	}
 
-	host := strings.ToLower(parsed.Hostname())
-	if host == "" || host == "localhost" || host == "127.0.0.1" || host == "::1" {
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return fmt.Errorf("internal or blocked host")
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		return validateDownloadIP(ip)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -50,14 +64,82 @@ func validateDownloadURL(rawURL string) error {
 	if err != nil {
 		return fmt.Errorf("could not resolve host")
 	}
-
 	for _, ip := range ips {
-		if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+		if err := validateDownloadIP(ip); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateDownloadIP(ip net.IP) error {
+	if ip == nil {
+		return fmt.Errorf("private/internal IP blocked")
+	}
+
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return fmt.Errorf("private/internal IP blocked")
+	}
+	addr = addr.Unmap()
+	if addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsInterfaceLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() {
+		return fmt.Errorf("private/internal IP blocked")
+	}
+	for _, prefix := range blockedDownloadPrefixes {
+		if prefix.Contains(addr) {
 			return fmt.Errorf("private/internal IP blocked")
 		}
 	}
-
 	return nil
+}
+
+// validateDownloadURL blocks file://, internal hosts, private IPs, and cloud metadata.
+// Only public http/https URLs are allowed.
+func validateDownloadURL(rawURL string) error {
+	return newDownloadURLGuard().Validate(rawURL)
+}
+
+type downloadRequestGuard struct {
+	validator    *downloadURLGuard
+	maxRedirects int
+	redirects    atomic.Int32
+
+	mu         sync.Mutex
+	blockedErr error
+}
+
+func newDownloadRequestGuard(validator *downloadURLGuard, maxRedirects int) *downloadRequestGuard {
+	return &downloadRequestGuard{
+		validator:    validator,
+		maxRedirects: maxRedirects,
+	}
+}
+
+func (g *downloadRequestGuard) Validate(rawURL string, redirected bool) error {
+	if err := g.validator.Validate(rawURL); err != nil {
+		return fmt.Errorf("unsafe browser request: %w", err)
+	}
+	if redirected && g.maxRedirects >= 0 {
+		count := int(g.redirects.Add(1))
+		if count > g.maxRedirects {
+			return fmt.Errorf("%w: got %d, max %d", bridge.ErrTooManyRedirects, count, g.maxRedirects)
+		}
+	}
+	return nil
+}
+
+func (g *downloadRequestGuard) NoteBlocked(err error) {
+	g.mu.Lock()
+	if g.blockedErr == nil {
+		g.blockedErr = err
+	}
+	g.mu.Unlock()
+}
+
+func (g *downloadRequestGuard) BlockedError() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.blockedErr
 }
 
 // HandleDownload fetches a URL using the browser's session (cookies, stealth)
@@ -77,7 +159,8 @@ func (h *Handlers) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := validateDownloadURL(dlURL); err != nil {
+	validator := newDownloadURLGuard()
+	if err := validator.Validate(dlURL); err != nil {
 		web.Error(w, 400, fmt.Errorf("unsafe URL: %w", err))
 		return
 	}
@@ -99,25 +182,23 @@ func (h *Handlers) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	var requestID network.RequestID
 	var responseMIME string
 	var responseStatus int
-	maxRedirects := h.Config.MaxRedirects
-	var redirectCount atomic.Int32
-	var redirectBlocked atomic.Bool
+	requestGuard := newDownloadRequestGuard(validator, h.Config.MaxRedirects)
+	var mainFrameID cdp.FrameID
 	done := make(chan struct{}, 1)
 
-	// If redirect limiting is enabled, use Fetch domain to intercept.
-	if maxRedirects >= 0 {
-		if err := chromedp.Run(tCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-			return fetch.Enable().Do(ctx)
-		})); err != nil {
-			web.Error(w, 500, fmt.Errorf("fetch enable: %w", err))
-			return
-		}
-		defer func() {
-			_ = chromedp.Run(tCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-				return fetch.Disable().Do(ctx)
-			}))
-		}()
+	// Intercept every browser-side request so redirects and follow-on navigations
+	// cannot escape the public-only URL policy enforced for /download.
+	if err := chromedp.Run(tCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return fetch.Enable().Do(ctx)
+	})); err != nil {
+		web.Error(w, 500, fmt.Errorf("fetch enable: %w", err))
+		return
 	}
+	defer func() {
+		_ = chromedp.Run(tCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			return fetch.Disable().Do(ctx)
+		}))
+	}()
 
 	chromedp.ListenTarget(tCtx, func(ev interface{}) {
 		switch e := ev.(type) {
@@ -125,18 +206,29 @@ func (h *Handlers) HandleDownload(w http.ResponseWriter, r *http.Request) {
 			// Handle in goroutine to avoid deadlocking the event dispatcher.
 			go func() {
 				reqID := e.RequestID
-				if e.RedirectedRequestID != "" && maxRedirects >= 0 {
-					count := int(redirectCount.Add(1))
-					if count > maxRedirects {
-						redirectBlocked.Store(true)
-						_ = fetch.FailRequest(reqID, network.ErrorReasonBlockedByClient).Do(cdp.WithExecutor(tCtx, chromedp.FromContext(tCtx).Target))
-						return
+				if err := requestGuard.Validate(e.Request.URL, e.RedirectedRequestID != ""); err != nil {
+					requestGuard.NoteBlocked(err)
+					select {
+					case done <- struct{}{}:
+					default:
 					}
+					_ = fetch.FailRequest(reqID, network.ErrorReasonBlockedByClient).Do(cdp.WithExecutor(tCtx, chromedp.FromContext(tCtx).Target))
+					return
 				}
 				_ = fetch.ContinueRequest(reqID).Do(cdp.WithExecutor(tCtx, chromedp.FromContext(tCtx).Target))
 			}()
+		case *network.EventRequestWillBeSent:
+			if e.Type != network.ResourceTypeDocument {
+				return
+			}
+			if mainFrameID == "" {
+				mainFrameID = e.FrameID
+			}
+			if e.FrameID == mainFrameID {
+				requestID = e.RequestID
+			}
 		case *network.EventResponseReceived:
-			if e.Response.URL == dlURL && requestID == "" {
+			if e.RequestID == requestID && requestID != "" {
 				requestID = e.RequestID
 				responseMIME = e.Response.MimeType
 				responseStatus = int(e.Response.Status)
@@ -172,8 +264,12 @@ func (h *Handlers) HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// Navigate the temp tab to the URL — uses browser's cookie jar and stealth.
 	if err := chromedp.Run(tCtx, chromedp.Navigate(dlURL)); err != nil {
-		if redirectBlocked.Load() {
-			web.Error(w, 422, fmt.Errorf("download: %w: got %d, max %d", bridge.ErrTooManyRedirects, redirectCount.Load(), maxRedirects))
+		if blockedErr := requestGuard.BlockedError(); blockedErr != nil {
+			if errors.Is(blockedErr, bridge.ErrTooManyRedirects) {
+				web.Error(w, 422, fmt.Errorf("download: %w", blockedErr))
+				return
+			}
+			web.Error(w, 400, blockedErr)
 			return
 		}
 		web.Error(w, 502, fmt.Errorf("navigate to download URL: %w", err))
@@ -184,16 +280,33 @@ func (h *Handlers) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	select {
 	case <-done:
 	case <-tCtx.Done():
-		if redirectBlocked.Load() {
-			web.Error(w, 422, fmt.Errorf("download: %w: got %d, max %d", bridge.ErrTooManyRedirects, redirectCount.Load(), maxRedirects))
+		if blockedErr := requestGuard.BlockedError(); blockedErr != nil {
+			if errors.Is(blockedErr, bridge.ErrTooManyRedirects) {
+				web.Error(w, 422, fmt.Errorf("download: %w", blockedErr))
+				return
+			}
+			web.Error(w, 400, blockedErr)
 			return
 		}
 		web.Error(w, 504, fmt.Errorf("download timed out"))
 		return
 	}
 
+	if blockedErr := requestGuard.BlockedError(); blockedErr != nil {
+		if errors.Is(blockedErr, bridge.ErrTooManyRedirects) {
+			web.Error(w, 422, fmt.Errorf("download: %w", blockedErr))
+			return
+		}
+		web.Error(w, 400, blockedErr)
+		return
+	}
+
 	if responseStatus >= 400 {
 		web.Error(w, 502, fmt.Errorf("remote server returned HTTP %d", responseStatus))
+		return
+	}
+	if requestID == "" {
+		web.Error(w, 502, fmt.Errorf("download response was not captured"))
 		return
 	}
 
