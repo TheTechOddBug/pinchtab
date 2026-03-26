@@ -121,6 +121,8 @@ Handles Cloudflare Turnstile and interstitial challenges.
 
 **Click strategy**: The solver uses human-like mouse input (Bezier curve movement, random delays, press/release offset) to click the Turnstile checkbox. Click coordinates are computed relative to the widget dimensions (not hardcoded pixel offsets) with randomised jitter.
 
+**Stealth requirement**: The Cloudflare solver works best with `stealthLevel: "full"` in the PinchTab config. Cloudflare evaluates browser fingerprints (CDP detection, WebGL, canvas, navigator properties) before and after the checkbox interaction. Without full stealth, the solver may click correctly but the challenge can still fail fingerprint verification. Check stealth status with `GET /stealth/status`.
+
 ## Writing a Custom Solver
 
 Implement the `solver.Solver` interface and register it during `init()`:
