@@ -401,6 +401,37 @@ func (h *Handlers) HandleNetworkExportStream(w http.ResponseWriter, r *http.Requ
 				flusher.Flush()
 				return
 			}
+
+			// The subscriber fires on requestWillBeSent (entry created) before
+			// responseReceived/loadingFinished populate status, headers, timing.
+			// Wait for the entry to be Finished before exporting it.
+			if !entry.Finished && !entry.Failed {
+				reqID := entry.RequestID
+				waitDeadline := time.After(10 * time.Second)
+				poll := time.NewTicker(200 * time.Millisecond)
+			waitDone:
+				for {
+					select {
+					case <-r.Context().Done():
+						poll.Stop()
+						finalize()
+						return
+					case <-waitDeadline:
+						poll.Stop()
+						if updated, found := buf.Get(reqID); found {
+							entry = updated
+						}
+						break waitDone
+					case <-poll.C:
+						if updated, found := buf.Get(reqID); found && (updated.Finished || updated.Failed) {
+							entry = updated
+							poll.Stop()
+							break waitDone
+						}
+					}
+				}
+			}
+
 			if !filter.Match(entry) {
 				continue
 			}
