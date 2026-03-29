@@ -33,6 +33,10 @@ func (m *liteActionBridge) EnsureChrome(cfg *config.RuntimeConfig) error {
 	return fmt.Errorf("ensureChrome should not be called for lite-routed actions")
 }
 
+func (m *liteActionBridge) RestartBrowser(cfg *config.RuntimeConfig) error {
+	return nil
+}
+
 type fakeLiteEngine struct {
 	clickRefs []string
 	typeCalls []struct {
@@ -76,6 +80,10 @@ func (m *failMockBridge) ListTargets() ([]*target.Info, error) {
 }
 
 func (m *failMockBridge) EnsureChrome(cfg *config.RuntimeConfig) error {
+	return nil
+}
+
+func (m *failMockBridge) RestartBrowser(cfg *config.RuntimeConfig) error {
 	return nil
 }
 

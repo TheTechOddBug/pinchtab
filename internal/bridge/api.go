@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 )
 
 // BridgeAPI abstracts browser tab operations for handler testing.
+var ErrBrowserDraining = errors.New("browser restart in progress; retry shortly")
+
 type BridgeAPI interface {
 	BrowserContext() context.Context
 	TabContext(tabID string) (ctx context.Context, resolvedID string, err error)
@@ -36,6 +39,7 @@ type BridgeAPI interface {
 	Unlock(tabID, owner string) error
 
 	EnsureChrome(cfg *config.RuntimeConfig) error
+	RestartBrowser(cfg *config.RuntimeConfig) error
 	StealthStatus() *stealth.Status
 
 	// Memory metrics

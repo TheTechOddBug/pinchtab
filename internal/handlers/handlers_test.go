@@ -74,6 +74,10 @@ func (m *mockBridge) EnsureChrome(cfg *config.RuntimeConfig) error {
 	return nil
 }
 
+func (m *mockBridge) RestartBrowser(cfg *config.RuntimeConfig) error {
+	return nil
+}
+
 func (m *mockBridge) DeleteRefCache(tabID string) {}
 
 func (m *mockBridge) TabLockInfo(tabID string) *bridge.LockInfo { return nil }
@@ -154,6 +158,9 @@ func TestHandlers(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "openapi") {
 		t.Fatalf("expected /openapi.json response to include openapi")
+	}
+	if !strings.Contains(w.Body.String(), "/browser/restart") {
+		t.Fatalf("expected /openapi.json response to include /browser/restart")
 	}
 
 	req = httptest.NewRequest("GET", "/metrics", nil)
@@ -462,6 +469,7 @@ func TestRoutesRegistration(t *testing.T) {
 		{"GET", "/health", 200},
 		{"GET", "/tabs", 200},
 		{"GET", "/welcome", 200},
+		{"POST", "/browser/restart", 200},
 		{"POST", "/navigate", 400}, // missing body
 	}
 

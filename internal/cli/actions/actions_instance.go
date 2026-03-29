@@ -56,3 +56,8 @@ func InstanceStop(client *http.Client, base, token string, args []string) {
 	instID := args[0]
 	apiclient.DoPost(client, base, token, fmt.Sprintf("/instances/%s/stop", instID), nil)
 }
+
+func InstanceRestart(client *http.Client, base, token string, args []string) {
+	instID := args[0]
+	apiclient.DoPost(client, base, token, fmt.Sprintf("/instances/%s/restart", instID), nil)
+}

@@ -95,7 +95,7 @@ func registerBrowserCommands() {
 func registerManagementCommands() {
 	setCommandGroup("management", instancesCmd, healthCmd, profilesCmd, activityCmd, instanceCmd)
 
-	instanceCmd.AddCommand(startInstanceCmd, instanceNavigateCmd, instanceStopCmd, instanceLogsCmd)
+	instanceCmd.AddCommand(startInstanceCmd, instanceNavigateCmd, instanceStopCmd, instanceRestartCmd, instanceLogsCmd)
 	activityCmd.AddCommand(activityTabCmd)
 
 	configureManagementFlags()

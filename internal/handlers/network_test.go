@@ -414,6 +414,10 @@ func (m *networkFailTabBridge) EnsureChrome(cfg *config.RuntimeConfig) error {
 	return nil
 }
 
+func (m *networkFailTabBridge) RestartBrowser(cfg *config.RuntimeConfig) error {
+	return nil
+}
+
 func TestHandleNetwork_TabNotFound(t *testing.T) {
 	nm := bridge.NewNetworkMonitor(100)
 	b := &networkFailTabBridge{nm: nm}

@@ -46,6 +46,7 @@ func (o *Orchestrator) registerHandlers(mux *http.ServeMux, skipLaunch bool) {
 	if !skipLaunch {
 		mux.HandleFunc("POST /instances/{id}/start", o.handleStartByInstanceID)
 	}
+	mux.HandleFunc("POST /instances/{id}/restart", o.handleRestartByInstanceID)
 	mux.HandleFunc("POST /instances/{id}/stop", o.handleStopByInstanceID)
 	mux.HandleFunc("GET /instances/{id}/logs", o.handleLogsByID)
 	mux.HandleFunc("GET /instances/{id}/logs/stream", o.handleLogsStreamByID)

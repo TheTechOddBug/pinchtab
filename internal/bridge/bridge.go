@@ -55,9 +55,11 @@ type Bridge struct {
 	fingerprintOverlays  map[string]bool
 	workerStealthTargets sync.Map
 
-	// Lazy initialization
+	// Lazy initialization / restart coordination
 	initMu      sync.Mutex
 	initialized bool
+	draining    bool
+	drainUntil  time.Time
 
 	// Temp profile cleanup: directories created as fallback when profile lock fails.
 	// These are removed on Cleanup() to prevent Chrome process/disk leaks.
@@ -101,6 +103,22 @@ func New(allocCtx, browserCtx context.Context, cfg *config.RuntimeConfig) *Bridg
 
 func (b *Bridge) quietStealthObservers() bool {
 	return b != nil && b.Config != nil && stealth.NormalizeLevel(b.Config.StealthLevel) == stealth.LevelFull
+}
+
+func (b *Bridge) RestartStatus() (bool, time.Duration) {
+	if b == nil {
+		return false, 0
+	}
+	b.initMu.Lock()
+	defer b.initMu.Unlock()
+	if !b.draining {
+		return false, 0
+	}
+	remaining := time.Until(b.drainUntil)
+	if remaining < 0 {
+		remaining = 0
+	}
+	return true, remaining
 }
 
 func (b *Bridge) injectStealth(ctx context.Context) {
@@ -206,6 +224,10 @@ func (b *Bridge) EnsureChrome(cfg *config.RuntimeConfig) error {
 	b.initMu.Lock()
 	defer b.initMu.Unlock()
 
+	if b.draining {
+		return ErrBrowserDraining
+	}
+
 	if b.initialized && b.BrowserCtx != nil {
 		// Check if browser context is still alive
 		if b.BrowserCtx.Err() == nil {
@@ -304,6 +326,96 @@ func (b *Bridge) EnsureChrome(cfg *config.RuntimeConfig) error {
 
 // Cleanup releases browser resources and removes temporary profile directories.
 // Must be called on shutdown to prevent Chrome process and disk leaks.
+func (b *Bridge) RestartBrowser(cfg *config.RuntimeConfig) error {
+	if cfg == nil {
+		cfg = b.Config
+	}
+	if cfg == nil {
+		return fmt.Errorf("runtime config is required")
+	}
+
+	const drainWindow = 2 * time.Second
+
+	b.initMu.Lock()
+	b.draining = true
+	b.drainUntil = time.Now().Add(drainWindow)
+	b.initMu.Unlock()
+
+	slog.Info("browser soft restart: draining requests before restart", "drain_window", drainWindow)
+	time.Sleep(drainWindow)
+
+	b.initMu.Lock()
+
+	if b.BrowserCancel != nil {
+		b.BrowserCancel()
+		slog.Info("browser soft restart: cancelled browser context")
+	}
+	if b.AllocCancel != nil {
+		b.AllocCancel()
+		slog.Info("browser soft restart: cancelled allocator context")
+	}
+
+	profileDir := ""
+	if b.tempProfileDir != "" {
+		profileDir = b.tempProfileDir
+	} else {
+		profileDir = cfg.ProfileDir
+	}
+	if profileDir != "" {
+		time.Sleep(200 * time.Millisecond)
+		killed := killChromeByProfileDir(profileDir)
+		if killed > 0 {
+			slog.Info("browser soft restart: killed surviving chrome processes", "count", killed, "profileDir", profileDir)
+		}
+		ClearChromeSessions(profileDir)
+	}
+	b.ClearSavedState()
+
+	if b.tempProfileDir != "" {
+		if err := os.RemoveAll(b.tempProfileDir); err != nil {
+			slog.Warn("failed to remove temp profile dir during restart", "path", b.tempProfileDir, "err", err)
+		} else {
+			slog.Info("removed temp profile dir during restart", "path", b.tempProfileDir)
+		}
+		b.tempProfileDir = ""
+	}
+
+	b.initialized = false
+	b.BrowserCtx = nil
+	b.BrowserCancel = nil
+	b.AllocCtx = nil
+	b.AllocCancel = nil
+	b.TabManager = nil
+	b.stealthLaunchMode = stealth.LaunchModeUninitialized
+
+	b.LogStore = NewConsoleLogStore(1000)
+	b.netMonitor = NewNetworkMonitor(DefaultNetworkBufferSize)
+	if cfg.NetworkBufferSize > 0 {
+		b.netMonitor = NewNetworkMonitor(cfg.NetworkBufferSize)
+	}
+	b.fingerprintMu.Lock()
+	b.fingerprintOverlays = make(map[string]bool)
+	b.fingerprintMu.Unlock()
+	b.workerStealthTargets = sync.Map{}
+	b.Dialogs = NewDialogManager()
+	b.Locks = NewLockManager()
+	b.Config = cfg
+
+	b.StealthBundle = nil
+	b.Actions = nil
+	b.InitActionRegistry()
+
+	b.draining = false
+	b.drainUntil = time.Time{}
+	b.initMu.Unlock()
+
+	if err := b.EnsureChrome(cfg); err != nil {
+		return err
+	}
+	b.CleanupSavedStateBackup()
+	return nil
+}
+
 func (b *Bridge) Cleanup() {
 	// Persist open tabs so next startup can restore them
 	if b.TabManager != nil && b.tempProfileDir == "" {

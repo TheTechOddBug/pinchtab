@@ -75,6 +75,29 @@ func (o *Orchestrator) handleStopByInstanceID(w http.ResponseWriter, r *http.Req
 	httpx.JSON(w, 200, map[string]string{"status": "stopped", "id": id})
 }
 
+func (o *Orchestrator) handleRestartByInstanceID(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	o.mu.RLock()
+	inst, ok := o.instances[id]
+	o.mu.RUnlock()
+	if !ok {
+		httpx.Error(w, 404, fmt.Errorf("instance %q not found", id))
+		return
+	}
+	if !instanceIsActive(inst) || inst.Status != "running" {
+		httpx.Error(w, 503, fmt.Errorf("instance %q is not running (status: %s)", id, inst.Status))
+		return
+	}
+
+	targetURL, err := o.instancePathURL(inst, "/browser/restart", "")
+	if err != nil {
+		httpx.Error(w, 502, err)
+		return
+	}
+	o.proxyToURL(w, r, targetURL)
+}
+
 func (o *Orchestrator) handleStartByInstanceID(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 

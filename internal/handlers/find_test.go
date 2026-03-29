@@ -24,7 +24,8 @@ type findMockBridge struct {
 	refCache *bridge.RefCache
 }
 
-func (m *findMockBridge) EnsureChrome(cfg *config.RuntimeConfig) error { return nil }
+func (m *findMockBridge) EnsureChrome(cfg *config.RuntimeConfig) error   { return nil }
+func (m *findMockBridge) RestartBrowser(cfg *config.RuntimeConfig) error { return nil }
 
 func (m *findMockBridge) TabContext(tabID string) (context.Context, string, error) {
 	if m.failTab {

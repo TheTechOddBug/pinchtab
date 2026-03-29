@@ -3,7 +3,9 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/pinchtab/pinchtab/internal/assets"
@@ -11,6 +13,7 @@ import (
 	"github.com/pinchtab/pinchtab/internal/config"
 	"github.com/pinchtab/pinchtab/internal/dashboard"
 	"github.com/pinchtab/pinchtab/internal/engine"
+	"github.com/pinchtab/pinchtab/internal/httpx"
 	"github.com/pinchtab/pinchtab/internal/idpi"
 	"github.com/pinchtab/pinchtab/internal/ids"
 	"github.com/pinchtab/semantic"
@@ -91,9 +94,38 @@ func New(b bridge.BridgeAPI, cfg *config.RuntimeConfig, p bridge.ProfileService,
 	return h
 }
 
+type restartStatusProvider interface {
+	RestartStatus() (bool, time.Duration)
+}
+
 // ensureChrome ensures Chrome is initialized before handling requests that need it
 func (h *Handlers) ensureChrome() error {
 	return h.Bridge.EnsureChrome(h.Config)
+}
+
+func (h *Handlers) bridgeRestartStatus() (bool, time.Duration) {
+	provider, ok := h.Bridge.(restartStatusProvider)
+	if !ok {
+		return false, 0
+	}
+	return provider.RestartStatus()
+}
+
+func (h *Handlers) writeBridgeUnavailable(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, bridge.ErrBrowserDraining) {
+		return false
+	}
+	draining, retryAfter := h.bridgeRestartStatus()
+	if !draining {
+		retryAfter = time.Second
+	}
+	seconds := int((retryAfter + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	httpx.ErrorCode(w, http.StatusServiceUnavailable, "browser_draining", err.Error(), true, map[string]any{"retryAfterSeconds": seconds})
+	return true
 }
 
 // useLite returns true when the engine router routes this operation to lite.
@@ -104,6 +136,7 @@ func (h *Handlers) useLite(op engine.Capability, url string) bool {
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux, doShutdown func()) {
 	mux.HandleFunc("GET /health", h.HandleHealth)
 	mux.HandleFunc("POST /ensure-chrome", h.HandleEnsureChrome)
+	mux.HandleFunc("POST /browser/restart", h.HandleBrowserRestart)
 	mux.HandleFunc("GET /tabs", h.HandleTabs)
 	mux.HandleFunc("POST /tabs/{id}/navigate", h.HandleTabNavigate)
 	mux.HandleFunc("POST /tabs/{id}/back", h.HandleTabBack)

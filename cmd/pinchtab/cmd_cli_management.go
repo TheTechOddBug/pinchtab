@@ -95,6 +95,17 @@ var instanceStopCmd = &cobra.Command{
 	},
 }
 
+var instanceRestartCmd = &cobra.Command{
+	Use:   "restart <id>",
+	Short: "Soft restart the browser process for an instance",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		runCLI(func(rt cliRuntime) {
+			browseractions.InstanceRestart(rt.client, rt.base, rt.token, args)
+		})
+	},
+}
+
 var instanceLogsCmd = &cobra.Command{
 	Use:   "logs <id>",
 	Short: "Get instance logs",
