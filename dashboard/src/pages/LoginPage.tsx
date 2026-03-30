@@ -45,6 +45,13 @@ export default function LoginPage() {
             This PinchTab server requires a bearer token before the dashboard
             can load protected routes and APIs.
           </p>
+          <p className="mt-1 text-xs leading-5 text-text-muted">
+            Run{" "}
+            <code className="rounded bg-[rgb(var(--brand-surface-code-rgb)/0.72)] px-1.5 py-0.5 text-text-secondary">
+              pinchtab config token
+            </code>{" "}
+            to copy the token to your clipboard.
+          </p>
         </div>
 
         <form

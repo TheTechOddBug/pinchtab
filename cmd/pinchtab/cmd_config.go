@@ -56,6 +56,14 @@ func init() {
 		},
 	})
 	configCmd.AddCommand(&cobra.Command{
+		Use:   "token",
+		Short: "Copy the API token to clipboard",
+		Long:  "Copies the configured server.token to the system clipboard. The token is never printed to stdout.",
+		Run: func(cmd *cobra.Command, args []string) {
+			handleConfigTokenCopy()
+		},
+	})
+	configCmd.AddCommand(&cobra.Command{
 		Use:   "get <path>",
 		Short: "Get a config value (e.g., server.port)",
 		Args:  cobra.ExactArgs(1),
@@ -279,6 +287,14 @@ func clipboardCommands() []clipboardCommand {
 			{name: "xclip", args: []string{"-selection", "clipboard"}},
 			{name: "xsel", args: []string{"--clipboard", "--input"}},
 		}
+	}
+}
+
+func handleConfigTokenCopy() {
+	cfg := loadLocalConfig()
+	if err := copyConfigToken(cfg.Token); err != nil {
+		fmt.Fprintln(os.Stderr, cli.StyleStderr(cli.ErrorStyle, err.Error()))
+		os.Exit(1)
 	}
 }
 

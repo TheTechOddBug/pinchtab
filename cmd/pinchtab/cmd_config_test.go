@@ -196,6 +196,43 @@ func TestConfigGetMasksServerToken(t *testing.T) {
 	}
 }
 
+func TestConfigTokenSubcommandCopiesToClipboard(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("PINCHTAB_CONFIG", configPath)
+	t.Setenv("PINCHTAB_TOKEN", "")
+
+	fc := config.DefaultFileConfig()
+	fc.Server.Token = "test-token-for-clipboard"
+	if err := config.SaveFileConfig(&fc, configPath); err != nil {
+		t.Fatalf("SaveFileConfig() error = %v", err)
+	}
+
+	t.Cleanup(func() {
+		rootCmd.SetArgs(nil)
+	})
+
+	output := captureStdout(t, func() {
+		rootCmd.SetArgs([]string{"config", "token"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+	})
+
+	if strings.Contains(output, "test-token-for-clipboard") {
+		t.Fatalf("expected token to stay hidden, got %q", output)
+	}
+}
+
+func TestCopyConfigTokenReturnsErrorWhenEmpty(t *testing.T) {
+	err := copyConfigToken("")
+	if err == nil {
+		t.Fatal("expected error for empty token")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("expected empty token error, got %q", err.Error())
+	}
+}
+
 func TestConfigSetMasksServerTokenInOutput(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("PINCHTAB_CONFIG", configPath)

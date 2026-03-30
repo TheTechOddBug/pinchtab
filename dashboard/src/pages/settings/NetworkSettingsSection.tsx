@@ -74,9 +74,18 @@ export function NetworkSettingsSection({
       >
         <div className="space-y-2">
           <div className="text-xs leading-5 text-text-muted">
-            {backendState?.tokenConfigured
-              ? "Token configured. Manage rotation through the CLI or config file; the current value is never returned by the server."
-              : "No token configured. Set one through the CLI or config file."}
+            {backendState?.tokenConfigured ? (
+              <>
+                Token configured. Manage rotation through the CLI or config
+                file; the current value is never returned by the server. Run{" "}
+                <code className="rounded bg-[rgb(var(--brand-surface-code-rgb)/0.72)] px-1 py-0.5 text-text-secondary">
+                  pinchtab config token
+                </code>{" "}
+                to copy it to your clipboard.
+              </>
+            ) : (
+              "No token configured. Set one through the CLI or config file."
+            )}
           </div>
           {apiTokenMissing && (
             <div className="rounded-sm border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive">
