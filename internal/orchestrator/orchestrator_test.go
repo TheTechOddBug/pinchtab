@@ -455,6 +455,7 @@ func TestOrchestrator_AttachBridge_UpsertsExistingBridge(t *testing.T) {
 	o.mu.RUnlock()
 	if internal == nil {
 		t.Fatalf("attached instance %q missing from orchestrator", first.ID)
+		return
 	}
 	if internal.authToken != "bridge-token-1" {
 		t.Fatalf("authToken = %q, want %q", internal.authToken, "bridge-token-1")
@@ -628,6 +629,31 @@ func TestValidateAttachURL_WildcardHost(t *testing.T) {
 	}
 	if err := o.validateAttachURL("http://bridge-container:9868"); err != nil {
 		t.Fatalf("wildcard host should allow hostname, got: %v", err)
+	}
+}
+
+func TestOrchestrator_RegisterHandlers_CacheRoutes(t *testing.T) {
+	o := NewOrchestratorWithRunner(t.TempDir(), &mockRunner{portAvail: true})
+	o.ApplyRuntimeConfig(&config.RuntimeConfig{})
+
+	mux := http.NewServeMux()
+	o.RegisterHandlers(mux)
+
+	routes := []struct {
+		method string
+		path   string
+		route  string
+	}{
+		{"POST", "/instances/inst1/cache/clear", "POST /instances/{id}/cache/clear"},
+		{"GET", "/instances/inst1/cache/status", "GET /instances/{id}/cache/status"},
+	}
+
+	for _, rt := range routes {
+		req := httptest.NewRequest(rt.method, rt.path, nil)
+		_, pattern := mux.Handler(req)
+		if pattern != rt.route {
+			t.Errorf("expected route %q for %s %s, got %q", rt.route, rt.method, rt.path, pattern)
+		}
 	}
 }
 

@@ -131,6 +131,8 @@ pinchtab clipboard read                 # Read server-side clipboard text
 pinchtab clipboard write <text>         # Write clipboard text
 pinchtab clipboard copy <text>          # Alias for write
 pinchtab clipboard paste                # Alias for read
+pinchtab cache clear                    # Clear browser HTTP disk cache
+pinchtab cache status                   # Check if cache can be cleared
 ```
 
 ## Capture And Export

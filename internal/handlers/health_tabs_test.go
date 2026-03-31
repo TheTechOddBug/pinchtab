@@ -486,6 +486,14 @@ func (m *MockBridge) GetErrorLogs(tabID string, limit int) []bridge.ErrorEntry {
 
 func (m *MockBridge) ClearErrorLogs(tabID string) {}
 
+func (m *MockBridge) ClearCache(ctx context.Context) error {
+	return nil
+}
+
+func (m *MockBridge) CanClearCache(ctx context.Context) (bool, error) {
+	return true, nil
+}
+
 type mockBridgeDisconnected struct {
 	mockBridge
 }

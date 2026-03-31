@@ -23,6 +23,7 @@ func TestDialogManager_SetAndGetPending(t *testing.T) {
 	got := dm.GetPending("tab1")
 	if got == nil {
 		t.Fatal("expected pending dialog, got nil")
+		return
 	}
 	if got.Type != "alert" {
 		t.Errorf("expected type 'alert', got %q", got.Type)
@@ -56,6 +57,7 @@ func TestDialogManager_GetAndClear(t *testing.T) {
 	got := dm.GetAndClear("tab1")
 	if got == nil {
 		t.Fatal("expected pending dialog, got nil")
+		return
 	}
 	if got.Type != "prompt" {
 		t.Errorf("expected type 'prompt', got %q", got.Type)
@@ -111,6 +113,7 @@ func TestDialogManager_OverwritePending(t *testing.T) {
 	got := dm.GetPending("tab1")
 	if got == nil {
 		t.Fatal("expected pending dialog")
+		return
 	}
 	if got.Type != "confirm" || got.Message != "Second" {
 		t.Errorf("expected overwritten dialog, got %+v", got)
@@ -149,6 +152,7 @@ func TestDialogManager_TruncatesOversizedDialogText(t *testing.T) {
 	got := dm.GetPending("tab1")
 	if got == nil {
 		t.Fatal("expected pending dialog")
+		return
 	}
 	if len(got.Message) > testMaxDialogTextBytes {
 		t.Fatalf("message length = %d, want <= %d", len(got.Message), testMaxDialogTextBytes)

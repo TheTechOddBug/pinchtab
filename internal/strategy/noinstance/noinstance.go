@@ -47,6 +47,7 @@ func (s *Strategy) RegisterRoutes(mux *http.ServeMux) {
 		"GET /cookies", "POST /cookies",
 		"GET /stealth/status", "POST /fingerprint/rotate",
 		"POST /find",
+		"POST /cache/clear", "GET /cache/status",
 		"GET /solvers",
 		"POST /solve", "POST /solve/{name}",
 		"GET /network", "GET /network/stream", "GET /network/export", "GET /network/export/stream", "GET /network/{requestId}", "POST /network/clear",

@@ -214,6 +214,8 @@ GET  /clipboard/read
 POST /clipboard/write
 POST /clipboard/copy
 GET  /clipboard/paste
+POST /cache/clear
+GET  /cache/status
 ```
 
 Notes:

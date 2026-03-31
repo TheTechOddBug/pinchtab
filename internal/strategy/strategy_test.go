@@ -1,14 +1,21 @@
 package strategy_test
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/pinchtab/pinchtab/internal/config"
+	"github.com/pinchtab/pinchtab/internal/orchestrator"
 	"github.com/pinchtab/pinchtab/internal/strategy"
 
 	// Register strategies via init()
 	_ "github.com/pinchtab/pinchtab/internal/strategy/alwayson"
 	_ "github.com/pinchtab/pinchtab/internal/strategy/autorestart"
 	_ "github.com/pinchtab/pinchtab/internal/strategy/explicit"
+	_ "github.com/pinchtab/pinchtab/internal/strategy/noinstance"
 	_ "github.com/pinchtab/pinchtab/internal/strategy/simple"
 )
 
@@ -76,6 +83,52 @@ func TestRegistry_Names(t *testing.T) {
 	}
 	if !found["always-on"] {
 		t.Error("always-on not in names")
+	}
+}
+
+type mockRunner struct{}
+
+func (m *mockRunner) Run(_ context.Context, _ string, _ []string, _ []string, _ io.Writer, _ io.Writer) (orchestrator.Cmd, error) {
+	return nil, nil
+}
+func (m *mockRunner) IsPortAvailable(_ string) bool { return true }
+
+func TestCacheRoutes_RegisteredAcrossStrategies(t *testing.T) {
+	strategies := []string{"simple", "explicit", "no-instance", "simple-autorestart"}
+	cacheRoutes := []struct {
+		method string
+		path   string
+		route  string
+	}{
+		{"POST", "/cache/clear", "POST /cache/clear"},
+		{"GET", "/cache/status", "GET /cache/status"},
+	}
+
+	for _, name := range strategies {
+		t.Run(name, func(t *testing.T) {
+			s, err := strategy.New(name)
+			if err != nil {
+				t.Fatalf("strategy.New(%q): %v", name, err)
+			}
+
+			orch := orchestrator.NewOrchestratorWithRunner(t.TempDir(), &mockRunner{})
+			orch.ApplyRuntimeConfig(&config.RuntimeConfig{})
+
+			if oa, ok := s.(strategy.OrchestratorAware); ok {
+				oa.SetOrchestrator(orch)
+			}
+
+			mux := http.NewServeMux()
+			s.RegisterRoutes(mux)
+
+			for _, rt := range cacheRoutes {
+				req := httptest.NewRequest(rt.method, rt.path, nil)
+				_, pattern := mux.Handler(req)
+				if pattern != rt.route {
+					t.Errorf("strategy %q: expected route %q for %s %s, got %q", name, rt.route, rt.method, rt.path, pattern)
+				}
+			}
+		})
 	}
 }
 

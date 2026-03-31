@@ -54,10 +54,10 @@ cd dashboard
 # Detect runner
 RUN="bun"
 if ! command -v bun &>/dev/null; then
-  if command -v npx &>/dev/null; then
-    RUN="npx"
+  if command -v npm &>/dev/null; then
+    RUN="npm"
   else
-    fail "Neither bun nor npx found"
+    fail "Neither bun nor npm found"
     exit 1
   fi
 fi

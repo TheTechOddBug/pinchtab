@@ -61,6 +61,10 @@ type BridgeAPI interface {
 	ClearConsoleLogs(tabID string)
 	GetErrorLogs(tabID string, limit int) []ErrorEntry
 	ClearErrorLogs(tabID string)
+
+	// Cache management
+	ClearCache(ctx context.Context) error
+	CanClearCache(ctx context.Context) (bool, error)
 }
 
 type LockInfo = bridgetabs.LockInfo

@@ -221,6 +221,8 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux, doShutdown func()) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(assets.WelcomeHTML))
 	})
+	mux.HandleFunc("POST /cache/clear", h.HandleCacheClear)
+	mux.HandleFunc("GET /cache/status", h.HandleCacheStatus)
 
 	if h.Profiles != nil {
 		h.Profiles.RegisterHandlers(mux)
