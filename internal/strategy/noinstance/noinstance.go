@@ -34,34 +34,8 @@ func (s *Strategy) Start(_ context.Context) error { return nil }
 func (s *Strategy) Stop() error                   { return nil }
 
 func (s *Strategy) RegisterRoutes(mux *http.ServeMux) {
-	// Register orchestrator handlers without local launch endpoints
 	s.orch.RegisterHandlersNoLaunch(mux)
-
-	// Shorthand endpoints proxy to first running (remote) instance
-	shorthandRoutes := []string{
-		"GET /snapshot", "GET /screenshot", "GET /text", "GET /pdf", "POST /pdf",
-		"POST /navigate", "POST /back", "POST /forward", "POST /reload",
-		"POST /action", "POST /actions",
-		"POST /wait",
-		"POST /tab", "POST /tab/lock", "POST /tab/unlock",
-		"GET /cookies", "POST /cookies",
-		"GET /stealth/status", "POST /fingerprint/rotate",
-		"POST /find",
-		"POST /cache/clear", "GET /cache/status",
-		"GET /solvers",
-		"POST /solve", "POST /solve/{name}",
-		"GET /network", "GET /network/stream", "GET /network/export", "GET /network/export/stream", "GET /network/{requestId}", "POST /network/clear",
-	}
-	for _, route := range shorthandRoutes {
-		mux.HandleFunc(route, s.proxyToFirst)
-	}
-	strategy.RegisterCapabilityRoute(mux, "POST /evaluate", s.orch.AllowsEvaluate(), "evaluate", "security.allowEvaluate", "evaluate_disabled", s.proxyToFirst)
-	strategy.RegisterCapabilityRoute(mux, "GET /download", s.orch.AllowsDownload(), "download", "security.allowDownload", "download_disabled", s.proxyToFirst)
-	strategy.RegisterCapabilityRoute(mux, "POST /upload", s.orch.AllowsUpload(), "upload", "security.allowUpload", "upload_disabled", s.proxyToFirst)
-	strategy.RegisterCapabilityRoute(mux, "GET /screencast", s.orch.AllowsScreencast(), "screencast", "security.allowScreencast", "screencast_disabled", s.proxyToFirst)
-	strategy.RegisterCapabilityRoute(mux, "GET /screencast/tabs", s.orch.AllowsScreencast(), "screencast", "security.allowScreencast", "screencast_disabled", s.proxyToFirst)
-	strategy.RegisterCapabilityRoute(mux, "POST /macro", s.orch.AllowsMacro(), "macro", "security.allowMacro", "macro_disabled", s.proxyToFirst)
-
+	strategy.RegisterShorthandRoutes(mux, s.orch, s.proxyToFirst)
 	mux.HandleFunc("GET /tabs", s.handleTabs)
 }
 

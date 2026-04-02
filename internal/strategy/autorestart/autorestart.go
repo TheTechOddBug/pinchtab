@@ -173,35 +173,7 @@ func (s *Strategy) Stop() error {
 // RegisterRoutes adds shorthand endpoints that proxy to the managed instance.
 func (s *Strategy) RegisterRoutes(mux *http.ServeMux) {
 	s.orch.RegisterHandlers(mux)
-
-	shorthandRoutes := []string{
-		"GET /snapshot", "GET /screenshot", "GET /text", "GET /pdf", "POST /pdf",
-		"GET /console", "POST /console/clear",
-		"GET /errors", "POST /errors/clear",
-		"GET /clipboard/read", "POST /clipboard/write", "POST /clipboard/copy", "GET /clipboard/paste",
-		"GET /network", "GET /network/stream", "GET /network/export", "GET /network/export/stream", "GET /network/{requestId}", "POST /network/clear",
-		"POST /navigate", "POST /back", "POST /forward", "POST /reload",
-		"POST /action", "POST /actions",
-		"POST /dialog",
-		"POST /wait",
-		"POST /tab", "POST /tab/lock", "POST /tab/unlock",
-		"GET /cookies", "POST /cookies",
-		"GET /stealth/status", "POST /fingerprint/rotate",
-		"POST /find",
-		"POST /cache/clear", "GET /cache/status",
-		"GET /solvers",
-		"POST /solve", "POST /solve/{name}",
-	}
-	for _, route := range shorthandRoutes {
-		mux.HandleFunc(route, s.proxyToManaged)
-	}
-	strategy.RegisterCapabilityRoute(mux, "POST /evaluate", s.orch.AllowsEvaluate(), "evaluate", "security.allowEvaluate", "evaluate_disabled", s.proxyToManaged)
-	strategy.RegisterCapabilityRoute(mux, "GET /download", s.orch.AllowsDownload(), "download", "security.allowDownload", "download_disabled", s.proxyToManaged)
-	strategy.RegisterCapabilityRoute(mux, "POST /upload", s.orch.AllowsUpload(), "upload", "security.allowUpload", "upload_disabled", s.proxyToManaged)
-	strategy.RegisterCapabilityRoute(mux, "GET /screencast", s.orch.AllowsScreencast(), "screencast", "security.allowScreencast", "screencast_disabled", s.proxyToManaged)
-	strategy.RegisterCapabilityRoute(mux, "GET /screencast/tabs", s.orch.AllowsScreencast(), "screencast", "security.allowScreencast", "screencast_disabled", s.proxyToManaged)
-	strategy.RegisterCapabilityRoute(mux, "POST /macro", s.orch.AllowsMacro(), "macro", "security.allowMacro", "macro_disabled", s.proxyToManaged)
-
+	strategy.RegisterShorthandRoutes(mux, s.orch, s.proxyToManaged)
 	mux.HandleFunc("GET /tabs", s.handleTabs)
 	mux.HandleFunc("GET "+s.config.StatusPath, s.handleStatus)
 }
