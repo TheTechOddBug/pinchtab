@@ -321,6 +321,10 @@ func (h *Handlers) HandleAction(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if errors.Is(actionErr, bridge.ErrUnexpectedNavigation) {
+			httpx.ErrorCode(w, 409, "navigation_changed", actionErr.Error(), false, nil)
+			return
+		}
 		if errors.Is(actionErr, engine.ErrLiteNotSupported) {
 			httpx.ErrorCode(w, http.StatusNotImplemented, "not_supported", actionErr.Error(), false, nil)
 			return
@@ -1076,6 +1080,12 @@ func shouldRetryStaleRef(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, bridge.ErrElementStale) {
+		return true
+	}
+	// Fallback string matching is still needed for stale failures that can bypass
+	// bridge.ExecuteAction classification (for example, lite-engine paths or other
+	// non-bridge error surfaces that return raw backend-node messages).
 	e := strings.ToLower(err.Error())
 	return strings.Contains(e, "could not find node") || strings.Contains(e, "node with given id") || strings.Contains(e, "no node")
 }
