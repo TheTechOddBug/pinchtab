@@ -1,39 +1,21 @@
-#!/bin/bash
-# autosolver-realworld.sh — Real-site AutoSolver simulation for stealth leakage checks.
-#
-# This scenario is intentionally manual/high-friction and should not be run in CI.
-# It compares pre-solve vs post-solve detection signals on real bot-detection pages.
-#
-# Usage:
-#   RUN_REAL_WORLD_AUTOSOLVER=1 \
-#   E2E_SERVER=http://localhost:9999 \
-#   E2E_SERVER_TOKEN=e2e-token \
-#   bash tests/e2e/scenarios-api/autosolver-realworld.sh
-#
-# Optional:
-#   REAL_WORLD_AUTOSOLVER_TARGETS="https://pixelscan.net/bot-check,https://bot.sannysoft.com,https://browserscan.net"
-#   REAL_WORLD_NAV_SLEEP_SEC=4
-#
-# Output:
-#   - Per-site pre-solve and post-solve signal table
-#   - Delta report (before -> after)
-#
-# Signals tracked:
-#   - Bot Behavior Detected
-#   - CDP Detected
-#   - NavigatorWebdriver
-#   - TamperedFunctions
+#!/usr/bin/env bash
+set -euo pipefail
 
-GROUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${GROUP_DIR}/../../helpers/api.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-if [ "${RUN_REAL_WORLD_AUTOSOLVER:-0}" != "1" ]; then
-  echo "[autosolver-realworld] skipped: set RUN_REAL_WORLD_AUTOSOLVER=1 to run this scenario"
-  exit 0
-fi
+source "${ROOT_DIR}/tests/e2e/helpers/api.sh"
+source "${ROOT_DIR}/tests/e2e/helpers/autosolver.sh"
 
-TARGETS_CSV="${REAL_WORLD_AUTOSOLVER_TARGETS:-https://pixelscan.net/bot-check,https://bot.sannysoft.com,https://browserscan.net}"
+TARGETS_CSV="${REAL_WORLD_AUTOSOLVER_TARGETS:-https://bot.sannysoft.com}"
 NAV_SLEEP_SEC="${REAL_WORLD_NAV_SLEEP_SEC:-4}"
+
+autosolver_use_medium_server
+
+cleanup() {
+  autosolver_restore_server
+}
+trap cleanup EXIT
 
 split_csv_targets() {
   local csv="$1"
@@ -92,22 +74,33 @@ log_signal_delta() {
   local after_json="$3"
 
   echo -e "  ${MUTED}${label}${NC}"
+  local key
   for key in botBehaviorDetected cdpDetected navigatorWebdriver tamperedFunctions; do
-    local b a
-    b=$(echo "$before_json" | jq -r ".${key}")
-    a=$(echo "$after_json" | jq -r ".${key}")
-    local marker="="
-    if [ "$b" != "$a" ]; then
+    local before after marker
+    before=$(echo "$before_json" | jq -r ".${key}")
+    after=$(echo "$after_json" | jq -r ".${key}")
+    marker="="
+    if [ "$before" != "$after" ]; then
       marker="->"
     fi
-    echo "    ${key}: ${b} ${marker} ${a}"
+    echo "    ${key}: ${before} ${marker} ${after}"
   done
+}
+
+require_server() {
+  if e2e_curl -sf "${E2E_SERVER}/health" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "autosolver smoke: server not reachable at ${E2E_SERVER}" >&2
+  echo "Set E2E_SERVER/E2E_SERVER_TOKEN to a running PinchTab instance." >&2
+  exit 1
 }
 
 run_site() {
   local url="$1"
 
-  echo -e "${BLUE}[realworld] navigate:${NC} ${url}"
+  echo -e "${BLUE}[autosolver-smoke] navigate:${NC} ${url}"
   pt_post /navigate "{\"url\":\"${url}\"}"
   if [ "$HTTP_STATUS" != "200" ] && [ "$HTTP_STATUS" != "201" ]; then
     echo -e "  ${RED}✗${NC} navigate failed (${HTTP_STATUS})"
@@ -125,6 +118,8 @@ run_site() {
     ((ASSERTIONS_FAILED++)) || true
     return
   fi
+  echo -e "  ${GREEN}✓${NC} navigated to target"
+  ((ASSERTIONS_PASSED++)) || true
 
   sleep "$NAV_SLEEP_SEC"
 
@@ -135,11 +130,13 @@ run_site() {
     ((ASSERTIONS_FAILED++)) || true
     return
   fi
+  echo -e "  ${GREEN}✓${NC} captured pre-solve text"
+  ((ASSERTIONS_PASSED++)) || true
 
   local before_signals
   before_signals=$(capture_signals_json "$before_text")
 
-  echo -e "${BLUE}[realworld] solve:${NC} ${url}"
+  echo -e "${BLUE}[autosolver-smoke] solve:${NC} ${url}"
   pt_post /solve "{\"tabId\":\"${tab_id}\",\"maxAttempts\":3,\"timeout\":45000}"
   if [ "$HTTP_STATUS" != "200" ]; then
     echo -e "  ${RED}✗${NC} solve failed (${HTTP_STATUS})"
@@ -153,6 +150,8 @@ run_site() {
   attempts=$(echo "$RESULT" | jq -r '.attempts // 0')
   challenge_type=$(echo "$RESULT" | jq -r '.challengeType // ""')
   echo -e "  ${MUTED}solver=${solver_name:-auto} solved=${solved} attempts=${attempts} challengeType=${challenge_type}${NC}"
+  echo -e "  ${GREEN}✓${NC} solve request completed"
+  ((ASSERTIONS_PASSED++)) || true
 
   sleep 2
 
@@ -163,30 +162,25 @@ run_site() {
     ((ASSERTIONS_FAILED++)) || true
     return
   fi
+  echo -e "  ${GREEN}✓${NC} captured post-solve text"
+  ((ASSERTIONS_PASSED++)) || true
 
   local after_signals
   after_signals=$(capture_signals_json "$after_text")
-
   log_signal_delta "Detections (before -> after):" "$before_signals" "$after_signals"
-
-  # The test is observational: success means pipeline completed and signals were captured.
-  ((ASSERTIONS_PASSED++)) || true
 }
 
-start_test "TestAutoSolver_RealWorldSimulation"
+require_server
+
+start_test "autosolver-realworld-smoke"
 
 split_csv_targets "$TARGETS_CSV"
 for target in "${TARGETS[@]}"; do
-  target="${target## }"
-  target="${target%% }"
-  if [ -z "$target" ]; then
-    continue
-  fi
+  target="${target#"${target%%[![:space:]]*}"}"
+  target="${target%"${target##*[![:space:]]}"}"
+  [ -n "$target" ] || continue
   run_site "$target"
 done
 
 end_test
-
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  print_summary
-fi
+print_summary

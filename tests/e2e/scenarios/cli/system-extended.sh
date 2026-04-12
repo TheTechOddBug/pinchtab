@@ -204,7 +204,7 @@ if [ -z "$INSTANCE_ID" ]; then
   echo -e "  ${RED}✗${NC} no disposable instance id returned"
   ((ASSERTIONS_FAILED++)) || true
   end_test
-  exit 0
+  return 0
 fi
 
 echo -e "  ${GREEN}✓${NC} disposable instance: ${INSTANCE_ID:0:12}..."

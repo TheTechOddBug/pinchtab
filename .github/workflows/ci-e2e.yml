@@ -32,9 +32,9 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
-      api_touched: ${{ steps.changes.outputs.api_touched }}
-      cli_touched: ${{ steps.changes.outputs.cli_touched }}
-      infra_touched: ${{ steps.changes.outputs.infra_touched }}
+      api_extended_touched: ${{ steps.changes.outputs.api_extended_touched }}
+      cli_extended_touched: ${{ steps.changes.outputs.cli_extended_touched }}
+      infra_extended_touched: ${{ steps.changes.outputs.infra_extended_touched }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -44,14 +44,26 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only origin/main...HEAD)
 
-          # Find touched extended/standalone scenarios
-          API_TOUCHED=$(echo "$CHANGED" | grep -E 'tests/e2e/scenarios/api/.*-extended\.sh|tests/e2e/scenarios/api/[^/-]+\.sh' | tr '\n' ' ' || true)
-          CLI_TOUCHED=$(echo "$CHANGED" | grep -E 'tests/e2e/scenarios/cli/.*-extended\.sh|tests/e2e/scenarios/cli/[^/-]+\.sh' | tr '\n' ' ' || true)
-          INFRA_TOUCHED=$(echo "$CHANGED" | grep -E 'tests/e2e/scenarios/infra/.*-extended\.sh|tests/e2e/scenarios/infra/[^/-]+\.sh' | tr '\n' ' ' || true)
+          # Touching any non-basic scenario should trigger the matching
+          # extended suite in its native environment rather than trying to
+          # inject that file into the basic-stack PR jobs.
+          if echo "$CHANGED" | grep -E '^tests/e2e/scenarios/api/[^/]+\.sh$' | grep -Ev '(^|/)[^/]+-basic\.sh$' >/dev/null; then
+            echo "api_extended_touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "api_extended_touched=false" >> "$GITHUB_OUTPUT"
+          fi
 
-          echo "api_touched=$API_TOUCHED" >> "$GITHUB_OUTPUT"
-          echo "cli_touched=$CLI_TOUCHED" >> "$GITHUB_OUTPUT"
-          echo "infra_touched=$INFRA_TOUCHED" >> "$GITHUB_OUTPUT"
+          if echo "$CHANGED" | grep -E '^tests/e2e/scenarios/cli/[^/]+\.sh$' | grep -Ev '(^|/)[^/]+-basic\.sh$' >/dev/null; then
+            echo "cli_extended_touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cli_extended_touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -E '^tests/e2e/scenarios/infra/[^/]+\.sh$' | grep -Ev '(^|/)[^/]+-basic\.sh$' >/dev/null; then
+            echo "infra_extended_touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "infra_extended_touched=false" >> "$GITHUB_OUTPUT"
+          fi
 
   api:
     needs: [detect-changes]
@@ -60,10 +72,20 @@ jobs:
     with:
       ref: ${{ github.sha }}
       suite: api
-      extra_scenarios: ${{ needs.detect-changes.outputs.api_touched || '' }}
       summary_title: E2E API Tests
       timeout_minutes: 15
       compose_file: tests/e2e/docker-compose.yml
+
+  api-extended-pr:
+    needs: [detect-changes]
+    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.api_extended_touched == 'true'
+    uses: ./.github/workflows/reusable-e2e.yml
+    with:
+      ref: ${{ github.sha }}
+      suite: api-extended
+      summary_title: E2E API Extended Tests (PR)
+      timeout_minutes: 20
+      compose_file: tests/e2e/docker-compose-multi.yml
 
   cli:
     needs: [detect-changes]
@@ -72,9 +94,19 @@ jobs:
     with:
       ref: ${{ github.sha }}
       suite: cli
-      extra_scenarios: ${{ needs.detect-changes.outputs.cli_touched || '' }}
       summary_title: E2E CLI Tests
       timeout_minutes: 15
+      compose_file: tests/e2e/docker-compose.yml
+
+  cli-extended-pr:
+    needs: [detect-changes]
+    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.cli_extended_touched == 'true'
+    uses: ./.github/workflows/reusable-e2e.yml
+    with:
+      ref: ${{ github.sha }}
+      suite: cli-extended
+      summary_title: E2E CLI Extended Tests (PR)
+      timeout_minutes: 20
       compose_file: tests/e2e/docker-compose.yml
 
   infra:
@@ -84,10 +116,20 @@ jobs:
     with:
       ref: ${{ github.sha }}
       suite: infra
-      extra_scenarios: ${{ needs.detect-changes.outputs.infra_touched || '' }}
       summary_title: E2E Infra Tests
       timeout_minutes: 15
       compose_file: tests/e2e/docker-compose.yml
+
+  infra-extended-pr:
+    needs: [detect-changes]
+    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.infra_extended_touched == 'true'
+    uses: ./.github/workflows/reusable-e2e.yml
+    with:
+      ref: ${{ github.sha }}
+      suite: infra-extended
+      summary_title: E2E Infra Extended Tests (PR)
+      timeout_minutes: 25
+      compose_file: tests/e2e/docker-compose-multi.yml
 
   # Extended suites for manual dispatch
   api-extended:

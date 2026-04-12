@@ -50,7 +50,7 @@ func (g *ShieldGuard) ScanContent(text string) CheckResult {
 
 	cr := CheckResult{
 		Threat:  result.Blocked || len(result.Patterns) > 0,
-		Blocked: result.Blocked,
+		Blocked: g.cfg.StrictMode && result.Blocked,
 		Reason:  result.Reason,
 	}
 
@@ -65,7 +65,7 @@ func (g *ShieldGuard) CheckDomain(rawURL string) CheckResult {
 	result := g.shield.CheckDomain(rawURL)
 	return CheckResult{
 		Threat:  result.Blocked || result.Score > 0,
-		Blocked: result.Blocked,
+		Blocked: g.cfg.StrictMode && result.Blocked,
 		Reason:  result.Reason,
 	}
 }

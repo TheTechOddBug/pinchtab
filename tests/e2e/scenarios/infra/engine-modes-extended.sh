@@ -14,7 +14,7 @@ CHROME_SERVER="$E2E_SERVER"
 
 if [ -z "${E2E_LITE_SERVER:-}" ]; then
   echo "  ⚠️  E2E_LITE_SERVER not set, skipping engine-modes tests"
-  exit 0
+  return 0
 fi
 
 lite_get() {

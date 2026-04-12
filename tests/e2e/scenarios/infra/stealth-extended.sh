@@ -18,7 +18,7 @@ run_stealth_level_matrix() {
       ;;
     *)
       echo "unknown stealth level: ${STEALTH_LEVEL}" >&2
-      exit 1
+      return 1
       ;;
   esac
 
@@ -432,7 +432,7 @@ if [ "${STEALTH_MATRIX:-0}" = "1" ]; then
   if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     print_summary
   fi
-  exit 0
+  return 0
 fi
 
 # Adds the heavier heuristics and secure-instance smoke checks on top of the
