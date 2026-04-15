@@ -34,6 +34,7 @@ describe("StartInstanceModal", () => {
     const command = document.querySelector("textarea") as HTMLTextAreaElement;
     expect(command.value).toContain('"profileId":"prof_alpha"');
     expect(command.value).toContain('"mode":"headed"');
+    expect(command.value).toContain("Authorization: Bearer <token>");
 
     await userEvent.type(
       screen.getByPlaceholderText("Auto-select from configured range"),
@@ -83,5 +84,27 @@ describe("StartInstanceModal", () => {
     expect(fetchInstances).toHaveBeenCalledTimes(1);
     expect(useAppStore.getState().instances).toEqual(updatedInstances);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("prevents launch when port input is invalid", async () => {
+    const { launchInstance } = await import("../../services/api");
+
+    render(
+      <StartInstanceModal open={true} profile={profile} onClose={() => {}} />,
+    );
+
+    const portInput = screen.getByPlaceholderText(
+      "Auto-select from configured range",
+    );
+    await userEvent.type(portInput, "invalid-port");
+
+    expect(
+      screen.getByText("Port must be a whole number between 1 and 65535."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    expect(launchInstance).not.toHaveBeenCalled();
   });
 });

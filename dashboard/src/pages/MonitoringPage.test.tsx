@@ -109,6 +109,27 @@ describe("MonitoringPage", () => {
     expect(screen.getByText("prof_beta")).toBeInTheDocument();
   });
 
+  it("refreshes instances after stopping a running instance", async () => {
+    render(
+      <MemoryRouter initialEntries={["/dashboard/monitoring"]}>
+        <Routes>
+          <Route path="/dashboard/monitoring" element={<MonitoringPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => {
+      expect(api.stopInstance).toHaveBeenCalledWith("inst_beta");
+    });
+    expect(api.fetchInstances).toHaveBeenCalled();
+  });
+
   it("retries while waiting for an expected default instance", async () => {
     useAppStore.setState({
       instances: [],
@@ -189,6 +210,9 @@ describe("MonitoringPage", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "Start Default Instance" }),
     );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Start Headed" }),
+    );
 
     await waitFor(() => {
       expect(api.launchInstance).toHaveBeenCalledWith({
@@ -197,5 +221,42 @@ describe("MonitoringPage", () => {
       });
     });
     expect(api.fetchInstances).toHaveBeenCalled();
+  });
+
+  it("can start the default instance in headless mode", async () => {
+    vi.mocked(api.fetchBackendConfig).mockResolvedValueOnce({
+      config: {
+        multiInstance: { strategy: "no-instance" },
+        profiles: { defaultProfile: "default" },
+        instanceDefaults: { mode: "headed" },
+      },
+    } as never);
+    useAppStore.setState({
+      instances: [],
+      currentTabs: {},
+      selectedMonitoringInstanceId: null,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/dashboard/monitoring"]}>
+        <Routes>
+          <Route path="/dashboard/monitoring" element={<MonitoringPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Start Default Instance" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Start Headless" }),
+    );
+
+    await waitFor(() => {
+      expect(api.launchInstance).toHaveBeenCalledWith({
+        profileId: "default",
+        mode: undefined,
+      });
+    });
   });
 });

@@ -13,6 +13,7 @@ export default function InstanceLogsPanel({
   const [logs, setLogs] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const streamVersionRef = useRef(0);
 
   useEffect(() => {
     if (!instanceId) {
@@ -22,12 +23,16 @@ export default function InstanceLogsPanel({
     }
 
     let cancelled = false;
+    const fetchStartedAtVersion = streamVersionRef.current;
     setLoading(true);
 
     api
       .fetchInstanceLogs(instanceId)
       .then((nextLogs) => {
-        if (!cancelled) {
+        if (
+          !cancelled &&
+          streamVersionRef.current === fetchStartedAtVersion
+        ) {
           setLogs(nextLogs);
         }
       })
@@ -54,7 +59,10 @@ export default function InstanceLogsPanel({
     }
 
     return api.subscribeToInstanceLogs(instanceId, {
-      onLogs: (nextLogs) => setLogs(nextLogs),
+      onLogs: (nextLogs) => {
+        streamVersionRef.current += 1;
+        setLogs(nextLogs);
+      },
     });
   }, [instanceId]);
 
