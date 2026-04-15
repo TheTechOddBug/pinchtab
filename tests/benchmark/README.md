@@ -13,7 +13,7 @@ cd tests/benchmark
 
 # agent-browser lane
 ./scripts/run-agent-browser-benchmark.sh
-# Then run tasks from AGENT_BROWSER_TASKS.md with ./scripts/ab
+# Then read AGENT_BROWSER_INSTRUCTIONS.md and run tasks from AGENT_BROWSER_TASKS.md with ./scripts/ab
 ./scripts/finalize-report.sh
 ```
 
@@ -34,13 +34,13 @@ If Docker build fails or is skipped, the benchmark is **INVALID**.
 | File | Purpose |
 |------|---------|
 | `../../skills/pinchtab/SKILL.md` | PinchTab skill (same as shipped product) |
-| `../../skills/agent-browser/SKILL.md` | `agent-browser` skill for the benchmark wrapper |
+| `AGENT_BROWSER_INSTRUCTIONS.md` | Benchmark-local instructions for the `agent-browser` lane |
 | `BASELINE_TASKS.md` | Standalone task list (same as skill) |
 | `AGENT_BROWSER_TASKS.md` | Equivalent task lane for `agent-browser` |
 | `scripts/run-optimization.sh` | Initialize PinchTab benchmark reports |
 | `scripts/run-agent-browser-benchmark.sh` | Start fixtures + `agent-browser` and initialize a fresh report |
 | `scripts/ab` | Docker-backed `agent-browser` wrapper with tool-call logging |
-| `scripts/record-step.sh` | Record step results with token counts and tool-call counts |
+| `scripts/record-step.sh` | Record step results and tool-call counts |
 | `scripts/finalize-report.sh` | Generate final summary report |
 | `config/pinchtab.json` | PinchTab configuration |
 | `agent-browser/Dockerfile` | `agent-browser` benchmark image |
@@ -53,14 +53,19 @@ The benchmark is designed to run in a fresh agent context:
 
 1. Initialize the relevant benchmark lane
 2. Execute the natural-language tasks with the target browser surface
-3. Record each step's input/output tokens
-4. Let the harness count browser/tool calls where possible
+3. Record each step's raw answer/result
+4. Verify observed steps in a separate pass
+5. Let the harness count browser/tool calls where possible
 
 This measures the **real cost** of using a browser tool with an agent, including:
 - Context loading overhead
-- Per-task token usage
 - Browser/tool-call count
 - Total benchmark cost
+
+For agent lanes, the recommended flow is two-phase:
+
+1. execution agent records each step as `answer`
+2. verifier agent reads the report and stamps each step with `verify-step.sh`
 
 ## Environment
 
@@ -72,24 +77,29 @@ The benchmark runs PinchTab in Docker with:
 - **Headless**: Yes
 - **Multi-instance**: Enabled (2 instances)
 
-## Token Tracking
+## Step Recording
 
-Every step must track token usage:
+Every step must record the answer/result:
 
 ```bash
-./scripts/record-step.sh <group> <step> <pass|fail|skip> <input_tokens> <output_tokens> "notes"
+./scripts/record-step.sh <group> <step> <pass|fail|skip|answer> "notes"
 ```
 
 Example:
 ```bash
-./scripts/record-step.sh 1 1 pass 150 45 "Navigation completed in 1.2s"
-./scripts/record-step.sh 2 3 fail 200 80 "Element not found"
+./scripts/record-step.sh 1 1 pass "Navigation completed in 1.2s"
+./scripts/record-step.sh 2 3 fail "Element not found"
 ```
 
-Token counts should come from your model's API response:
-- **Anthropic**: `usage.input_tokens`, `usage.output_tokens`
-- **OpenAI**: `usage.prompt_tokens`, `usage.completion_tokens`
-- **Gemini**: `usageMetadata.promptTokenCount`, `usageMetadata.candidatesTokenCount`
+Deferred-verification example:
+
+```bash
+./scripts/record-step.sh --type agent 1 1 answer \
+  "Found categories Programming Languages: 12, Databases: 8" \
+  "raw answer"
+./scripts/verify-step.sh --type agent 1 1 pass \
+  "Answer satisfies the benchmark oracle"
+```
 
 ## Reports
 
@@ -111,11 +121,10 @@ Reports are generated in `results/`:
 | Steps Failed | 2 |
 | Pass Rate | 93.7% |
 
-## Token Usage
+## Tooling
 | Metric | Value |
 |--------|-------|
-| Total Tokens | 4,523 |
-| Estimated Cost | $0.0158 |
+| Tool Calls | 128 |
 ```
 
 ## Running Programmatically

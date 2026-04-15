@@ -6,17 +6,23 @@ PinchTab CLI.
 
 ## Setup
 
-1. Read `../../skills/agent-browser/SKILL.md` first. This is your guide to the
-   benchmark wrapper and command workflow.
+1. Read `./AGENT_BROWSER_INSTRUCTIONS.md` first. This is your benchmark guide to
+   the wrapper and command workflow.
 
-2. Start the Docker benchmark environment and initialize a report:
+2. Load the live CLI skill content before using browser commands:
+
+```bash
+./scripts/ab skills get agent-browser --full
+```
+
+3. Start the Docker benchmark environment and initialize a report:
 
 ```bash
 cd tests/benchmark
 ./scripts/run-agent-browser-benchmark.sh
 ```
 
-3. Use the Docker-backed wrapper for every browser action:
+4. Use the Docker-backed wrapper for every browser action:
 
 ```bash
 ./scripts/ab open http://fixtures/
@@ -25,15 +31,22 @@ cd tests/benchmark
 ./scripts/ab fill @e3 "agent@benchmark.test"
 ```
 
-4. Record each completed step:
+5. Record each completed step as an answer/result first:
 
 ```bash
-./scripts/record-step.sh --type agent-browser 1 1 pass --tokens 120 48 "completed"
+./scripts/record-step.sh --type agent-browser 1 1 answer \
+  "opened fixtures home and got refs e1-e13" "completed"
 ```
 
 `record-step.sh` will automatically calculate the number of `agent-browser`
 tool calls used since the previous recorded step by reading
 `results/agent_browser_commands.ndjson`.
+
+6. After the execution lane is done, run a separate verification pass with:
+
+```bash
+./scripts/verify-step.sh --type agent-browser 1 1 pass "matched expected homepage state"
+```
 
 ## Environment
 
@@ -43,7 +56,7 @@ tool calls used since the previous recorded step by reading
 
 ## Tooling Guidance
 
-Use `../../skills/agent-browser/SKILL.md` as the primary operating guide.
+Use `./AGENT_BROWSER_INSTRUCTIONS.md` as the primary benchmark operating guide.
 Reach for `./scripts/ab --help` only when the skill does not already answer the
 question.
 

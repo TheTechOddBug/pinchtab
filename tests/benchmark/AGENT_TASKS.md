@@ -7,7 +7,11 @@ Natural language tasks to test how well an agent uses PinchTab from skill docs a
 1. Read `../../skills/pinchtab/SKILL.md` — this is your only guide
 2. For each task, figure out which commands to use
 3. **Log every command executed**
-4. Record: `./scripts/record-step.sh --type agent <group> <step> <pass|fail> --tokens <in> <out> "notes"`
+4. Do not score your own work as pass/fail unless a task is trivially objective.
+5. Prefer recording each step as `answer` with the actual response/result:
+   `./scripts/record-step.sh --type agent <group> <step> answer "<what you saw>" "notes"`
+6. A separate verification pass should later stamp the step with:
+   `./scripts/verify-step.sh --type agent <group> <step> <pass|fail|skip> "verification notes"`
 
 ### Recommended setup: env vars + `./scripts/pt` wrapper
 
@@ -40,8 +44,8 @@ export PINCHTAB_TAB=$(./scripts/pt nav http://fixtures/)
 ./scripts/pt click '#submit'
 ./scripts/pt drag '#piece' --drag-x 12 --drag-y -158
 
-# Record step results:
-./scripts/record-step.sh --type agent 1 2 pass "worked"
+# Record answer/result for later verification:
+./scripts/record-step.sh --type agent 1 2 answer "clicked submit and saw success banner" "worked"
 ```
 
 The wrapper is a ~60-line shell script; read `scripts/pt` for the exact
@@ -49,6 +53,10 @@ forwarding rules. Flags after `pt` are forwarded verbatim to `pinchtab`, so
 anything that works with `pinchtab ...` works with `./scripts/pt ...`.
 
 Explicit `--tab <id>` on any command still wins over `PINCHTAB_TAB`.
+
+For deferred verification, keep the answer payload factual. Record the
+actual page text, count, answer, or state transition you observed, not your own
+judgment about whether that matches the benchmark oracle.
 
 ## Environment
 

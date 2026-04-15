@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCH_DIR="${SCRIPT_DIR}/.."
 RESULTS_DIR="${BENCH_DIR}/results"
+CURRENT_REPORT_PTR="${RESULTS_DIR}/current_agent_browser_report.txt"
 mkdir -p "${RESULTS_DIR}"
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -56,12 +57,15 @@ cat > "${REPORT_FILE}" << EOF
 }
 EOF
 
+printf '%s\n' "${REPORT_FILE}" > "${CURRENT_REPORT_PTR}"
+
 echo "Initialized agent-browser benchmark report:"
 echo "  ${REPORT_FILE}"
 echo ""
 echo "Next steps:"
-echo "  1. Read ../../skills/agent-browser/SKILL.md"
-echo "  2. Use ./scripts/ab ... to drive agent-browser inside Docker"
-echo "  3. Record each completed benchmark step with:"
-echo "     ./scripts/record-step.sh --type agent-browser <group> <step> <pass|fail|skip> --tokens <in> <out> \"notes\""
-echo "  4. Summarize the report with ./scripts/finalize-report.sh"
+echo "  1. Read ./AGENT_BROWSER_INSTRUCTIONS.md"
+echo "  2. Load the live CLI skill with ./scripts/ab skills get agent-browser --full"
+echo "  3. Use ./scripts/ab ... to drive agent-browser inside Docker"
+echo "  4. Record each completed benchmark step with:"
+echo "     ./scripts/record-step.sh --type agent-browser <group> <step> <pass|fail|skip|answer> \"what you saw\" \"notes\""
+echo "  5. Summarize the report with ./scripts/finalize-report.sh"
