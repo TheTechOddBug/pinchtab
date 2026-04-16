@@ -310,7 +310,7 @@ export const defaultBackendConfig: BackendConfig = {
   autoSolver: {
     enabled: false,
     maxAttempts: 8,
-    solvers: ["cloudflare", "semantic", "capsolver", "twocaptcha"],
+    solvers: ["cloudflare", "semantic"],
     llmProvider: "",
     llmFallback: false,
   },
