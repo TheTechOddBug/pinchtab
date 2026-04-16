@@ -35,6 +35,14 @@ import {
 const BASE = ""; // Uses proxy in dev
 const DASHBOARD_SOURCE_HEADER = "X-PinchTab-Source";
 const DASHBOARD_SOURCE = "dashboard";
+const REALTIME_AUTH_PROBE_COOLDOWN_MS = 3000;
+let realtimeAuthProbeInFlight: Promise<void> | null = null;
+let lastRealtimeAuthProbeAt = 0;
+
+export function resetRealtimeAuthProbeStateForTests(): void {
+  realtimeAuthProbeInFlight = null;
+  lastRealtimeAuthProbeAt = 0;
+}
 
 type RequestMeta = {
   suppressAuthRedirect?: boolean;
@@ -158,6 +166,13 @@ function withDashboardSource(options?: RequestInit): RequestInit {
   };
 }
 
+function normalizeInstance(instance: Instance): Instance {
+  return {
+    ...instance,
+    mode: instance.mode ?? (instance.headless ? "headless" : "headed"),
+  };
+}
+
 // Profiles — endpoint is /profiles (no /api prefix)
 export async function fetchProfiles(): Promise<Profile[]> {
   return request<Profile[]>("/profiles");
@@ -204,17 +219,20 @@ export async function updateProfile(
 
 // Instances — endpoint is /instances (no /api prefix)
 export async function fetchInstances(): Promise<Instance[]> {
-  return request<Instance[]>("/instances");
+  return (await request<Instance[]>("/instances")).map(normalizeInstance);
 }
 
 export async function launchInstance(
   data: LaunchInstanceRequest,
 ): Promise<Instance> {
-  return request<Instance>("/instances/launch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
+  // Use the canonical start endpoint to avoid legacy launch alias validation edge cases.
+  return normalizeInstance(
+    await request<Instance>("/instances/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  );
 }
 
 export async function stopInstance(id: string): Promise<void> {
@@ -616,12 +634,27 @@ export async function postProgress(
 }
 
 export async function handleRealtimeAuthFailure(): Promise<void> {
-  try {
-    const result = await probeBackendAuth();
-    if (result.mode === "required") {
-      dispatchAuthRequired("missing_token");
-    }
-  } catch {
-    dispatchServerUnreachable();
+  const now = Date.now();
+  if (realtimeAuthProbeInFlight) {
+    return realtimeAuthProbeInFlight;
   }
+  if (now - lastRealtimeAuthProbeAt < REALTIME_AUTH_PROBE_COOLDOWN_MS) {
+    return;
+  }
+
+  lastRealtimeAuthProbeAt = now;
+  realtimeAuthProbeInFlight = (async () => {
+    try {
+      const result = await probeBackendAuth();
+      if (result.mode === "required") {
+        dispatchAuthRequired("missing_token");
+      }
+    } catch {
+      dispatchServerUnreachable();
+    }
+  })().finally(() => {
+    realtimeAuthProbeInFlight = null;
+  });
+
+  return realtimeAuthProbeInFlight;
 }

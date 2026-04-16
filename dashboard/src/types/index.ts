@@ -310,7 +310,7 @@ export const defaultBackendConfig: BackendConfig = {
   autoSolver: {
     enabled: false,
     maxAttempts: 8,
-    solvers: ["cloudflare", "semantic", "capsolver", "twocaptcha"],
+    solvers: ["cloudflare", "semantic"],
     llmProvider: "",
     llmFallback: false,
   },
@@ -428,7 +428,10 @@ export function normalizeMonitoringSnapshot(
 ): MonitoringSnapshot {
   return {
     timestamp: input.timestamp ?? Date.now(),
-    instances: input.instances ?? [],
+    instances: (input.instances ?? []).map((instance) => ({
+      ...instance,
+      mode: instance.mode ?? (instance.headless ? "headless" : "headed"),
+    })),
     tabs: input.tabs ?? [],
     metrics: input.metrics ?? [],
     serverMetrics: {
