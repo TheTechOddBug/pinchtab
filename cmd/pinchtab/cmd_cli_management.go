@@ -11,7 +11,7 @@ var instancesCmd = &cobra.Command{
 	Short: "List or manage instances",
 	Run: func(cmd *cobra.Command, args []string) {
 		runCLI(func(rt cliRuntime) {
-			browseractions.Instances(rt.client, rt.base, rt.token)
+			browseractions.Instances(rt.client, rt.base, rt.token, cmd)
 		})
 	},
 }
@@ -31,7 +31,7 @@ var profilesCmd = &cobra.Command{
 	Short: "List browser profiles",
 	Run: func(cmd *cobra.Command, args []string) {
 		runCLI(func(rt cliRuntime) {
-			browseractions.Profiles(rt.client, rt.base, rt.token)
+			browseractions.Profiles(rt.client, rt.base, rt.token, cmd)
 		})
 	},
 }

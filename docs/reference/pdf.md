@@ -4,13 +4,13 @@ Render the current page as a PDF.
 
 ```bash
 curl "http://localhost:9867/pdf?output=file"
-# CLI Alternative
+# Response: {"path":"/path/to/state/pdfs/page-20260308-120001.pdf","size":48210}
+
+# CLI Alternative (human-readable by default)
 pinchtab pdf -o page.pdf
-# Response
-{
-  "path": "/path/to/state/pdfs/page-20260308-120001.pdf",
-  "size": 48210
-}
+# Output: Saved page.pdf (48210 bytes)
+
+pinchtab pdf                        # Auto-generates filename: page-20260308-120001.pdf
 ```
 
 ## CLI Flags

@@ -16,7 +16,7 @@ end_test
 # ─────────────────────────────────────────────────────────────────
 start_test "pinchtab instances"
 
-pt_ok instances
+pt_ok instances --json
 assert_output_json
 # Output is an array like [{id:..., status:...}], check for instance properties
 assert_output_contains "id" "returns instance id"

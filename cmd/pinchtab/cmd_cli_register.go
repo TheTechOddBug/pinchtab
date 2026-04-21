@@ -348,6 +348,9 @@ func configureManagementFlags() {
 
 	activityCmd.PersistentFlags().Int("limit", 200, "Maximum number of events to return")
 	activityCmd.PersistentFlags().Int("age-sec", 0, "Only include events from the last N seconds")
+
+	instancesCmd.Flags().Bool("json", false, "Output full JSON response instead of terse status")
+	profilesCmd.Flags().Bool("json", false, "Output full JSON response instead of terse status")
 }
 
 func setCommandGroup(groupID string, cmds ...*cobra.Command) {
