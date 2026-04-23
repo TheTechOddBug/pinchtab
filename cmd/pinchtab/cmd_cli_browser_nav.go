@@ -113,7 +113,7 @@ var tabHandoffCmd = &cobra.Command{
 		reason, _ := cmd.Flags().GetString("reason")
 		timeoutMS, _ := cmd.Flags().GetInt("timeout-ms")
 		runCLI(func(rt cliRuntime) {
-			browseractions.TabHandoff(rt.client, rt.base, rt.token, args[0], reason, timeoutMS)
+			browseractions.TabHandoff(rt.client, rt.base, rt.token, args[0], reason, timeoutMS, cmd)
 		})
 	},
 }
@@ -125,7 +125,7 @@ var tabResumeCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		status, _ := cmd.Flags().GetString("status")
 		runCLI(func(rt cliRuntime) {
-			browseractions.TabResume(rt.client, rt.base, rt.token, args[0], status)
+			browseractions.TabResume(rt.client, rt.base, rt.token, args[0], status, cmd)
 		})
 	},
 }
@@ -136,7 +136,7 @@ var tabHandoffStatusCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		runCLI(func(rt cliRuntime) {
-			browseractions.TabHandoffStatus(rt.client, rt.base, rt.token, args[0])
+			browseractions.TabHandoffStatus(rt.client, rt.base, rt.token, args[0], cmd)
 		})
 	},
 }

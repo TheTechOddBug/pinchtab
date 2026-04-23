@@ -3,14 +3,22 @@ package actions
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
+
+func newHandoffCmd() *cobra.Command {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("json", true, "")
+	return cmd
+}
 
 func TestTabHandoff(t *testing.T) {
 	m := newMockServer()
 	defer m.close()
 	client := m.server.Client()
 
-	TabHandoff(client, m.base(), "", "tab_123", "captcha_manual", 60000)
+	TabHandoff(client, m.base(), "", "tab_123", "captcha_manual", 60000, newHandoffCmd())
 
 	if m.lastMethod != "POST" {
 		t.Fatalf("expected POST, got %s", m.lastMethod)
@@ -36,7 +44,7 @@ func TestTabResume(t *testing.T) {
 	defer m.close()
 	client := m.server.Client()
 
-	TabResume(client, m.base(), "", "tab_123", "completed")
+	TabResume(client, m.base(), "", "tab_123", "completed", newHandoffCmd())
 
 	if m.lastMethod != "POST" {
 		t.Fatalf("expected POST, got %s", m.lastMethod)
@@ -60,7 +68,7 @@ func TestTabHandoffStatus(t *testing.T) {
 	defer m.close()
 	client := m.server.Client()
 
-	TabHandoffStatus(client, m.base(), "", "tab_123")
+	TabHandoffStatus(client, m.base(), "", "tab_123", newHandoffCmd())
 
 	if m.lastMethod != "GET" {
 		t.Fatalf("expected GET, got %s", m.lastMethod)
