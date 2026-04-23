@@ -357,6 +357,9 @@ start_test "handoff: actions work after resume"
 pt_post "/tabs/${BLOCK_TAB}/navigate" -d "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
 assert_ok "navigate to buttons page"
 
+pt_post /wait -d "{\"tabId\":\"${BLOCK_TAB}\",\"selector\":\"#btn-1\"}"
+assert_ok "wait for button"
+
 pt_post /action -d "{\"kind\":\"click\",\"selector\":\"#btn-1\",\"tabId\":\"${BLOCK_TAB}\"}"
 assert_ok "action succeeds after resume"
 
@@ -373,7 +376,9 @@ pt_post "/tabs/${BATCH_TAB}/handoff" -d '{"reason":"captcha"}'
 assert_ok "pause tab"
 
 pt_post /actions -d "{\"tabId\":\"${BATCH_TAB}\",\"actions\":[{\"kind\":\"click\",\"selector\":\"#btn-1\"}]}"
-assert_http_status 409 "batch action blocked during handoff"
+assert_ok "batch returns 200 with error in results"
+assert_json_contains "$RESULT" '.results[0].error' 'paused for human handoff' "error mentions handoff"
+assert_json_eq "$RESULT" '.failed' '1' "one action failed"
 
 pt_post "/tabs/${BATCH_TAB}/resume" -d '{}'
 assert_ok "resume tab"
@@ -403,6 +408,9 @@ assert_json_eq "$RESULT" '.status' 'active' "auto-expired to active"
 
 pt_post "/tabs/${TIMEOUT_TAB}/navigate" -d "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
 assert_ok "navigate to buttons page"
+
+pt_post /wait -d "{\"tabId\":\"${TIMEOUT_TAB}\",\"selector\":\"#btn-1\"}"
+assert_ok "wait for button"
 
 pt_post /action -d "{\"kind\":\"click\",\"selector\":\"#btn-1\",\"tabId\":\"${TIMEOUT_TAB}\"}"
 assert_ok "action succeeds after timeout expiry"
