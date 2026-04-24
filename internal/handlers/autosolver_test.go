@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pinchtab/pinchtab/internal/config"
 )
@@ -86,28 +88,44 @@ func TestMaybeAutoSolve_InvokesRunnerWhenEnabled(t *testing.T) {
 		}},
 	}
 
-	calls := 0
+	var calls atomic.Int64
+	done := make(chan struct{}, 8)
 	h.autoSolverRunner = func(_ context.Context, tabID string) error {
-		calls++
+		calls.Add(1)
 		if tabID != "tab1" {
-			t.Fatalf("runner tabID = %q, want tab1", tabID)
+			t.Errorf("runner tabID = %q, want tab1", tabID)
 		}
+		done <- struct{}{}
 		return nil
 	}
 
-	h.maybeAutoSolve(context.Background(), "tab1", autoSolverTriggerNavigate)
-	if calls != 1 {
-		t.Fatalf("autoSolverRunner calls = %d, want 1", calls)
+	waitFor := func(expected int64) bool {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if calls.Load() == expected {
+				return true
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		return false
 	}
 
+	h.maybeAutoSolve(context.Background(), "tab1", autoSolverTriggerNavigate)
+	if !waitFor(1) {
+		t.Fatalf("autoSolverRunner calls = %d, want 1", calls.Load())
+	}
+	<-done
+
 	h.maybeAutoSolve(context.Background(), "", autoSolverTriggerNavigate)
-	if calls != 1 {
-		t.Fatalf("autoSolverRunner calls with empty tab id = %d, want unchanged", calls)
+	time.Sleep(20 * time.Millisecond) // ensure no goroutine was spawned
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("autoSolverRunner calls with empty tab id = %d, want unchanged", got)
 	}
 
 	h.Config.AutoSolver.TriggerOnNavigate = false
 	h.maybeAutoSolve(context.Background(), "tab1", autoSolverTriggerNavigate)
-	if calls != 1 {
-		t.Fatalf("autoSolverRunner calls with navigate trigger disabled = %d, want unchanged", calls)
+	time.Sleep(20 * time.Millisecond)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("autoSolverRunner calls with navigate trigger disabled = %d, want unchanged", got)
 	}
 }

@@ -156,14 +156,26 @@ func (h *Handlers) HandleSolve(w http.ResponseWriter, r *http.Request) {
 		title = page.Title()
 	}
 
-	httpx.JSON(w, 200, map[string]any{
+	challengeType := deriveChallengeType(result, page)
+	resp := map[string]any{
 		"tabId":         resolvedTabID,
 		"solver":        solverName,
 		"solved":        result.Solved,
-		"challengeType": deriveChallengeType(result, page),
+		"challengeType": challengeType,
 		"attempts":      result.Attempts,
 		"title":         title,
-	})
+	}
+
+	// If a challenge was detected but the solver couldn't resolve it, flip the
+	// tab into paused_handoff so subsequent actions block and the caller can
+	// escalate to a human.
+	if !result.Solved && result.Attempts > 0 && challengeType != "" {
+		h.autoHandoffAfterFailure(resolvedTabID, challengeType)
+		resp["handoff"] = "paused_handoff"
+		resp["hint"] = handoffHintMessage
+	}
+
+	httpx.JSON(w, 200, resp)
 }
 
 // HandleTabSolve handles POST /tabs/{id}/solve and /tabs/{id}/solve/{name}.

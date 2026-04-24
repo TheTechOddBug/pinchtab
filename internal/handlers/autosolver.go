@@ -17,24 +17,40 @@ import (
 const (
 	autoSolverTriggerNavigate = "navigate"
 	autoSolverTriggerAction   = "action"
+
+	// autoTriggerMaxAttempts caps retries on nav/action auto-triggers so a
+	// missed challenge doesn't block the request path. Explicit POST /solve
+	// still uses the fully configured MaxAttempts.
+	autoTriggerMaxAttempts = 2
+
+	// autoTriggerRunBudget caps the total time an auto-trigger run can take
+	// end-to-end (detection + retries). Safety valve for slow pages or solvers.
+	autoTriggerRunBudget = 45 * time.Second
 )
 
-func (h *Handlers) maybeAutoSolve(ctx context.Context, tabID, trigger string) {
+// maybeAutoSolve kicks off the autosolver pipeline for tabID in the background.
+// It never blocks the caller: the HTTP request that triggered this returns
+// immediately while the solver runs with its own bounded context. If the
+// solver detects a challenge and fails, the tab is flipped to paused_handoff
+// so subsequent action requests see the 409 handoff error.
+func (h *Handlers) maybeAutoSolve(_ context.Context, tabID, trigger string) {
 	if tabID == "" || h.autoSolverRunner == nil || !h.shouldAutoSolve(trigger) {
 		return
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
-	if err := h.autoSolverRunner(ctx, tabID); err != nil &&
-		!errors.Is(err, context.Canceled) &&
-		!errors.Is(err, context.DeadlineExceeded) {
-		slog.Warn("autosolver auto-trigger failed",
-			"trigger", trigger,
-			"tab_id", tabID,
-			"error", err)
-	}
+	go func() {
+		runCtx, cancel := context.WithTimeout(context.Background(), autoTriggerRunBudget)
+		defer cancel()
+
+		if err := h.autoSolverRunner(runCtx, tabID); err != nil &&
+			!errors.Is(err, context.Canceled) &&
+			!errors.Is(err, context.DeadlineExceeded) {
+			slog.Warn("autosolver auto-trigger failed",
+				"trigger", trigger,
+				"tab_id", tabID,
+				"error", err)
+		}
+	}()
 }
 
 func (h *Handlers) shouldAutoSolve(trigger string) bool {
@@ -67,17 +83,23 @@ func (h *Handlers) runAutoSolver(ctx context.Context, tabID string) error {
 		return err
 	}
 
-	html, err := page.HTML()
+	// Detection is the cheap path that runs on every nav/action — keep it
+	// short so normal pages return almost immediately.
+	detectCtx, detectCancel := context.WithTimeout(ctx, 5*time.Second)
+	html, err := fetchHTMLWithTimeout(detectCtx, page)
+	detectCancel()
 	if err != nil {
 		return err
 	}
 
-	// Auto-trigger focuses on challenge resolution and should be a no-op on normal pages.
 	if coreautosolver.DetectChallengeIntent(page.Title(), page.URL(), html) == nil {
 		return nil
 	}
 
 	cfg := h.normalizedAutoSolverConfig()
+	if cfg.MaxAttempts > autoTriggerMaxAttempts {
+		cfg.MaxAttempts = autoTriggerMaxAttempts
+	}
 	as := h.buildAutoSolver(cfg, true)
 
 	solveCtx, cancel := context.WithTimeout(ctx, estimateAutoSolverRunTimeout(cfg))
@@ -99,10 +121,59 @@ func (h *Handlers) runAutoSolver(ctx context.Context, tabID string) error {
 				"tab_id", tabID,
 				"attempts", result.Attempts,
 				"error", result.Error)
+			h.autoHandoffAfterFailure(tabID, deriveChallengeType(result, page))
 		}
 	}
 
 	return nil
+}
+
+// fetchHTMLWithTimeout runs page.HTML() but aborts if ctx fires first. Since
+// Page.HTML has no context argument, we run it in a goroutine and select on
+// ctx — a stuck CDP call will leak the goroutine until the call itself
+// unblocks, but the caller returns promptly.
+func fetchHTMLWithTimeout(ctx context.Context, page coreautosolver.Page) (string, error) {
+	type result struct {
+		html string
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		html, err := page.HTML()
+		ch <- result{html: html, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case r := <-ch:
+		return r.html, r.err
+	}
+}
+
+// autoHandoffAfterFailure flips the tab into paused_handoff so action routes
+// block and the dashboard/agent can escalate to a human. No-op if the tab is
+// already paused or the bridge does not support handoff state.
+func (h *Handlers) autoHandoffAfterFailure(tabID, challengeType string) {
+	if tabID == "" {
+		return
+	}
+	ctrl, ok := h.handoffController()
+	if !ok {
+		return
+	}
+	if state, exists := ctrl.TabHandoffState(tabID); exists && state.Status == "paused_handoff" {
+		return
+	}
+	reason := "autosolver_unsolved"
+	if trimmed := strings.TrimSpace(challengeType); trimmed != "" {
+		reason = "autosolver_unsolved:" + trimmed
+	}
+	if _, err := h.pauseTabForHandoff(tabID, reason, "autosolver", 0); err != nil {
+		slog.Warn("autosolver: auto-handoff failed",
+			"tab_id", tabID,
+			"reason", reason,
+			"error", err)
+	}
 }
 
 func (h *Handlers) normalizedAutoSolverConfig() coreautosolver.Config {
