@@ -126,14 +126,72 @@ compose_down() {
   compose -f "${compose_file}" down -v 2>/dev/null || true
 }
 
-# Always rebuild the fixtures nginx image up front so changes to
-# tests/e2e/nginx/{Dockerfile,default.conf} are guaranteed to land in the
-# container, regardless of whether `compose run --build` would otherwise
-# rebuild this transitive dependency. This eliminates an entire class of
-# "the new fixture config didn't get picked up" failure modes.
+# Shared-stack mode: when SHARED_STACK_COMPOSE is set, run_pr / run_release
+# have already built images and brought up the pinchtab/fixtures services
+# once for the whole orchestrator run. Individual suites then skip their
+# own per-suite build and tear-down.
+SHARED_STACK_COMPOSE="${SHARED_STACK_COMPOSE:-}"
+
+resolve_compose_file() {
+  # When a shared stack is active, every suite uses its compose file so
+  # that `compose run` reuses the already-running services.
+  local default="$1"
+  if [ -n "${SHARED_STACK_COMPOSE}" ]; then
+    printf '%s' "${SHARED_STACK_COMPOSE}"
+  else
+    printf '%s' "${default}"
+  fi
+}
+
+stack_build() {
+  [ -n "${SHARED_STACK_COMPOSE}" ] && return 0
+  build_support_images "$1"
+}
+
+stack_down() {
+  [ -n "${SHARED_STACK_COMPOSE}" ] && return 0
+  compose_down "$1"
+}
+
+bring_up_shared_stack() {
+  local compose_file="$1"
+  shift
+  echo "  ${MUTED}building shared-stack images${NC}"
+  compose -f "${compose_file}" build >/dev/null
+  echo "  ${MUTED}starting shared stack: $*${NC}"
+  # No --wait: runner-X depends_on each pinchtab service with
+  # `condition: service_healthy`, so `compose run --rm runner-X` will
+  # block on healthchecks anyway, and the runner itself polls /health
+  # via wait_for_instance_ready in tests/e2e/run.sh. Adding --wait here
+  # just makes the docker CLI poll the same thing twice.
+  compose -f "${compose_file}" up -d "$@"
+}
+
+# Restart the named services in-place to drop accumulated runtime state
+# (open tabs, sessions, instance handles) without paying the cost of a
+# full down/up + image rebuild. We only restart before the plugin suite
+# (the only transition where shared state proved to cause real failures
+# — screenshot timeouts after 700+ upstream tests). api↔cli↔infra
+# transitions don't need it: each handles its own tab lifecycle and the
+# in-suite test counts stay below the threshold that overwhelmed
+# pinchtab in earlier experiments.
+restart_shared_stack() {
+  local compose_file="$1"
+  shift
+  echo "  ${MUTED}restarting before plugin: $*${NC}"
+  compose -f "${compose_file}" restart "$@" >/dev/null
+  # Re-arm the runner-side healthcheck wait via depends_on; no --wait
+  # here for the same reason as bring_up_shared_stack above.
+}
+
+# Build every image referenced by the compose file in a single phase so
+# that downstream `compose run` / `compose up` calls don't need `--build`
+# (which would either re-export the same images or, worse, skip a stale
+# transitive dependency like fixtures). Builds are mostly cache hits, so
+# this just amortises the image-export cost.
 build_support_images() {
   local compose_file="$1"
-  compose -f "${compose_file}" build fixtures
+  compose -f "${compose_file}" build
 }
 
 run_logged_command() {
@@ -385,7 +443,7 @@ show_suite_skip() {
 }
 
 run_api() {
-  local compose_file="tests/e2e/docker-compose.yml"
+  local compose_file=$(resolve_compose_file "tests/e2e/docker-compose.yml")
   local summary_file="tests/e2e/results/summary-api.txt"
   local report_file="tests/e2e/results/report-api.md"
   local progress_file="tests/e2e/results/progress-api.log"
@@ -399,13 +457,13 @@ run_api() {
   local suite_started_at
   suite_started_at=$(now_ms)
   set +e
-  run_logged_command "${output_file}" "" "building support images" build_support_images "${compose_file}"
+  run_logged_command "${output_file}" "" "building support images" stack_build "${compose_file}"
   local api_exit=$?
   local -a args=()
   [ -n "${E2E_FILTER}" ] && args+=("filter=${E2E_FILTER}")
   [ -n "${E2E_EXTRA}" ] && args+=("extra=${E2E_EXTRA}")
   if [ "${api_exit}" -eq 0 ]; then
-    run_logged_command "${output_file}" "${progress_file}" "running api suite" compose -f "${compose_file}" run --build --rm -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-api /bin/bash /e2e/run.sh api "${args[@]}"
+    run_logged_command "${output_file}" "${progress_file}" "running api suite" compose -f "${compose_file}" run --rm -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-api /bin/bash /e2e/run.sh api "${args[@]}"
     api_exit=$?
   fi
   set -e
@@ -416,12 +474,12 @@ run_api() {
     show_failure_summary "${report_file}" "${output_file}"
     show_suite_artifacts "${summary_file}" "${report_file}" "${progress_file}" "${log_prefix}" "${output_file}" "${suite_duration_ms}" runner-api pinchtab
   fi
-  compose_down "${compose_file}"
+  stack_down "${compose_file}"
   return "${api_exit}"
 }
 
 run_api_extended() {
-  local compose_file="tests/e2e/docker-compose-multi.yml"
+  local compose_file=$(resolve_compose_file "tests/e2e/docker-compose-multi.yml")
   local summary_file="tests/e2e/results/summary-api-extended.txt"
   local report_file="tests/e2e/results/report-api-extended.md"
   local progress_file="tests/e2e/results/progress-api-extended.log"
@@ -435,10 +493,10 @@ run_api_extended() {
   local suite_started_at
   suite_started_at=$(now_ms)
   set +e
-  run_logged_command "${output_file}" "" "building support images" build_support_images "${compose_file}"
+  run_logged_command "${output_file}" "" "building support images" stack_build "${compose_file}"
   local api_exit=$?
   if [ "${api_exit}" -eq 0 ]; then
-    E2E_SUITE=api E2E_EXTENDED=true E2E_SCENARIO_FILTER="${E2E_FILTER}" E2E_TEST_FILTER="${E2E_TEST_FILTER}" run_logged_command "${output_file}" "${progress_file}" "running api extended suite" compose -f "${compose_file}" up --build --abort-on-container-exit --exit-code-from runner-api runner-api
+    run_logged_command "${output_file}" "${progress_file}" "running api extended suite" compose -f "${compose_file}" run --rm -e E2E_SUITE=api -e E2E_EXTENDED=true -e E2E_SCENARIO_FILTER="${E2E_FILTER}" -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-api
     api_exit=$?
   fi
   set -e
@@ -449,12 +507,12 @@ run_api_extended() {
     show_failure_summary "${report_file}" "${output_file}"
     show_suite_artifacts "${summary_file}" "${report_file}" "${progress_file}" "${log_prefix}" "${output_file}" "${suite_duration_ms}" runner-api pinchtab pinchtab-secure pinchtab-medium pinchtab-full pinchtab-lite pinchtab-bridge
   fi
-  compose_down "${compose_file}"
+  stack_down "${compose_file}"
   return "${api_exit}"
 }
 
 run_cli() {
-  local compose_file="tests/e2e/docker-compose.yml"
+  local compose_file=$(resolve_compose_file "tests/e2e/docker-compose.yml")
   local summary_file="tests/e2e/results/summary-cli.txt"
   local report_file="tests/e2e/results/report-cli.md"
   local progress_file="tests/e2e/results/progress-cli.log"
@@ -468,13 +526,13 @@ run_cli() {
   local suite_started_at
   suite_started_at=$(now_ms)
   set +e
-  run_logged_command "${output_file}" "" "building support images" build_support_images "${compose_file}"
+  run_logged_command "${output_file}" "" "building support images" stack_build "${compose_file}"
   local cli_exit=$?
   local -a args=()
   [ -n "${E2E_FILTER}" ] && args+=("filter=${E2E_FILTER}")
   [ -n "${E2E_EXTRA}" ] && args+=("extra=${E2E_EXTRA}")
   if [ "${cli_exit}" -eq 0 ]; then
-    run_logged_command "${output_file}" "${progress_file}" "running cli suite" compose -f "${compose_file}" run --build --rm -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-cli /bin/bash /e2e/run.sh cli "${args[@]}"
+    run_logged_command "${output_file}" "${progress_file}" "running cli suite" compose -f "${compose_file}" run --rm -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-cli /bin/bash /e2e/run.sh cli "${args[@]}"
     cli_exit=$?
   fi
   set -e
@@ -485,12 +543,12 @@ run_cli() {
     show_failure_summary "${report_file}" "${output_file}"
     show_suite_artifacts "${summary_file}" "${report_file}" "${progress_file}" "${log_prefix}" "${output_file}" "${suite_duration_ms}" runner-cli pinchtab
   fi
-  compose_down "${compose_file}"
+  stack_down "${compose_file}"
   return "${cli_exit}"
 }
 
 run_cli_extended() {
-  local compose_file="tests/e2e/docker-compose.yml"
+  local compose_file=$(resolve_compose_file "tests/e2e/docker-compose.yml")
   local summary_file="tests/e2e/results/summary-cli-extended.txt"
   local report_file="tests/e2e/results/report-cli-extended.md"
   local progress_file="tests/e2e/results/progress-cli-extended.log"
@@ -504,10 +562,10 @@ run_cli_extended() {
   local suite_started_at
   suite_started_at=$(now_ms)
   set +e
-  run_logged_command "${output_file}" "" "building support images" build_support_images "${compose_file}"
+  run_logged_command "${output_file}" "" "building support images" stack_build "${compose_file}"
   local cli_exit=$?
   if [ "${cli_exit}" -eq 0 ]; then
-    E2E_SUITE=cli E2E_EXTENDED=true E2E_SCENARIO_FILTER="${E2E_FILTER}" E2E_TEST_FILTER="${E2E_TEST_FILTER}" run_logged_command "${output_file}" "${progress_file}" "running cli extended suite" compose -f "${compose_file}" up --build --abort-on-container-exit --exit-code-from runner-cli runner-cli
+    run_logged_command "${output_file}" "${progress_file}" "running cli extended suite" compose -f "${compose_file}" run --rm -e E2E_SUITE=cli -e E2E_EXTENDED=true -e E2E_SCENARIO_FILTER="${E2E_FILTER}" -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-cli
     cli_exit=$?
   fi
   set -e
@@ -518,12 +576,12 @@ run_cli_extended() {
     show_failure_summary "${report_file}" "${output_file}"
     show_suite_artifacts "${summary_file}" "${report_file}" "${progress_file}" "${log_prefix}" "${output_file}" "${suite_duration_ms}" runner-cli pinchtab
   fi
-  compose_down "${compose_file}"
+  stack_down "${compose_file}"
   return "${cli_exit}"
 }
 
 run_infra() {
-  local compose_file="tests/e2e/docker-compose.yml"
+  local compose_file=$(resolve_compose_file "tests/e2e/docker-compose.yml")
   local summary_file="tests/e2e/results/summary-infra.txt"
   local report_file="tests/e2e/results/report-infra.md"
   local progress_file="tests/e2e/results/progress-infra.log"
@@ -537,13 +595,13 @@ run_infra() {
   local suite_started_at
   suite_started_at=$(now_ms)
   set +e
-  run_logged_command "${output_file}" "" "building support images" build_support_images "${compose_file}"
+  run_logged_command "${output_file}" "" "building support images" stack_build "${compose_file}"
   local infra_exit=$?
   local -a args=()
   [ -n "${E2E_FILTER}" ] && args+=("filter=${E2E_FILTER}")
   [ -n "${E2E_EXTRA}" ] && args+=("extra=${E2E_EXTRA}")
   if [ "${infra_exit}" -eq 0 ]; then
-    run_logged_command "${output_file}" "${progress_file}" "running infra suite" compose -f "${compose_file}" run --build --rm -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-api /bin/bash /e2e/run.sh infra "${args[@]}"
+    run_logged_command "${output_file}" "${progress_file}" "running infra suite" compose -f "${compose_file}" run --rm -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-api /bin/bash /e2e/run.sh infra "${args[@]}"
     infra_exit=$?
   fi
   set -e
@@ -554,12 +612,12 @@ run_infra() {
     show_failure_summary "${report_file}" "${output_file}"
     show_suite_artifacts "${summary_file}" "${report_file}" "${progress_file}" "${log_prefix}" "${output_file}" "${suite_duration_ms}" runner-api pinchtab
   fi
-  compose_down "${compose_file}"
+  stack_down "${compose_file}"
   return "${infra_exit}"
 }
 
 run_infra_extended() {
-  local compose_file="tests/e2e/docker-compose-multi.yml"
+  local compose_file=$(resolve_compose_file "tests/e2e/docker-compose-multi.yml")
   local summary_file="tests/e2e/results/summary-infra-extended.txt"
   local report_file="tests/e2e/results/report-infra-extended.md"
   local progress_file="tests/e2e/results/progress-infra-extended.log"
@@ -573,10 +631,10 @@ run_infra_extended() {
   local suite_started_at
   suite_started_at=$(now_ms)
   set +e
-  run_logged_command "${output_file}" "" "building support images" build_support_images "${compose_file}"
+  run_logged_command "${output_file}" "" "building support images" stack_build "${compose_file}"
   local infra_exit=$?
   if [ "${infra_exit}" -eq 0 ]; then
-    E2E_SUITE=infra E2E_EXTENDED=true E2E_SCENARIO_FILTER="${E2E_FILTER}" E2E_TEST_FILTER="${E2E_TEST_FILTER}" run_logged_command "${output_file}" "${progress_file}" "running infra extended suite" compose -f "${compose_file}" up --build --abort-on-container-exit --exit-code-from runner-api runner-api
+    run_logged_command "${output_file}" "${progress_file}" "running infra extended suite" compose -f "${compose_file}" run --rm -e E2E_SUITE=infra -e E2E_EXTENDED=true -e E2E_SCENARIO_FILTER="${E2E_FILTER}" -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-api
     infra_exit=$?
   fi
   set -e
@@ -587,7 +645,7 @@ run_infra_extended() {
     show_failure_summary "${report_file}" "${output_file}"
     show_suite_artifacts "${summary_file}" "${report_file}" "${progress_file}" "${log_prefix}" "${output_file}" "${suite_duration_ms}" runner-api pinchtab pinchtab-secure pinchtab-medium pinchtab-full pinchtab-lite pinchtab-bridge
   fi
-  compose_down "${compose_file}"
+  stack_down "${compose_file}"
   return "${infra_exit}"
 }
 
@@ -596,6 +654,13 @@ run_pr() {
   local cli_exit=0
   local infra_exit=0
   local ran_any=0
+  local stack_file="tests/e2e/docker-compose.yml"
+
+  # Bring up pinchtab + fixtures once and reuse across api/cli/infra. Each
+  # sub-suite then just runs `compose run --rm runner-X` against the live
+  # stack, skipping its own build/up/down — saves ~30-50s on a PR run.
+  export SHARED_STACK_COMPOSE="${stack_file}"
+  bring_up_shared_stack "${stack_file}" pinchtab fixtures
 
   if suite_filter_matches "tests/e2e/scenarios/api" false; then
     ran_any=1
@@ -622,6 +687,9 @@ run_pr() {
     show_suite_skip "infra"
   fi
 
+  unset SHARED_STACK_COMPOSE
+  compose_down "${stack_file}"
+
   echo ""
   if [ "${ran_any}" -eq 0 ]; then
     echo "  ${ERROR}No PR E2E suites matched filter '${E2E_FILTER}'${NC}"
@@ -637,7 +705,7 @@ run_pr() {
 }
 
 run_plugin() {
-  local compose_file="tests/e2e/docker-compose.yml"
+  local compose_file=$(resolve_compose_file "tests/e2e/docker-compose.yml")
   local summary_file="tests/e2e/results/summary-plugin.txt"
   local report_file="tests/e2e/results/report-plugin.md"
   local progress_file="tests/e2e/results/progress-plugin.log"
@@ -651,13 +719,13 @@ run_plugin() {
   local suite_started_at
   suite_started_at=$(now_ms)
   set +e
-  run_logged_command "${output_file}" "" "building support images" build_support_images "${compose_file}"
+  run_logged_command "${output_file}" "" "building support images" stack_build "${compose_file}"
   local plugin_exit=$?
   local -a args=()
   # Plugin suite ignores E2E_FILTER since it only has plugin-basic.sh
   # and filters like "api-extended" don't make sense for it
   if [ "${plugin_exit}" -eq 0 ]; then
-    run_logged_command "${output_file}" "${progress_file}" "running plugin suite" compose -f "${compose_file}" run --build --rm -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-api /bin/bash /e2e/run.sh plugin "${args[@]}"
+    run_logged_command "${output_file}" "${progress_file}" "running plugin suite" compose -f "${compose_file}" run --rm -e E2E_TEST_FILTER="${E2E_TEST_FILTER}" runner-api /bin/bash /e2e/run.sh plugin "${args[@]}"
     plugin_exit=$?
   fi
   set -e
@@ -668,7 +736,7 @@ run_plugin() {
     show_failure_summary "${report_file}" "${output_file}"
     show_suite_artifacts "${summary_file}" "${report_file}" "${progress_file}" "${log_prefix}" "${output_file}" "${suite_duration_ms}" runner-api pinchtab
   fi
-  compose_down "${compose_file}"
+  stack_down "${compose_file}"
   return "${plugin_exit}"
 }
 
@@ -678,6 +746,23 @@ run_release() {
   local infra_exit=0
   local plugin_exit=0
   local ran_any=0
+  local stack_file="tests/e2e/docker-compose-multi.yml"
+  local -a pinchtab_services=(
+    pinchtab pinchtab-secure pinchtab-autoclose pinchtab-medium
+    pinchtab-full pinchtab-lite pinchtab-bridge
+  )
+
+  # Bring up the multi-compose stack once and run all extended suites
+  # against it. We restart pinchtab in two places where empirical runs
+  # showed the only real contamination problems:
+  #   - before infra-extended: its `Extension config` probe inspects the
+  #     default-instance launch logs; api+cli leave instance-related
+  #     state that prevents the test from finding the load record
+  #   - before plugin: 700+ upstream tests cause screenshot endpoint
+  #     timeouts; plugin needs a fresh process
+  # The api↔cli transition is fine without a restart.
+  export SHARED_STACK_COMPOSE="${stack_file}"
+  bring_up_shared_stack "${stack_file}" "${pinchtab_services[@]}" fixtures
 
   if suite_filter_matches "tests/e2e/scenarios/api" true; then
     ran_any=1
@@ -691,6 +776,10 @@ run_release() {
   if suite_filter_matches "tests/e2e/scenarios/cli" true; then
     ran_any=1
     run_cli_extended || cli_exit=$?
+    # cli-extended only touches the basic pinchtab; infra-extended's
+    # `Extension config` probe inspects basic-pinchtab launch logs.
+    # The 6 variants stay clean across cli, so no need to restart them.
+    restart_shared_stack "${stack_file}" pinchtab
   else
     show_suite_skip "cli-extended"
   fi
@@ -700,6 +789,9 @@ run_release() {
   if suite_filter_matches "tests/e2e/scenarios/infra" true; then
     ran_any=1
     run_infra_extended || infra_exit=$?
+    # Plugin only uses the basic pinchtab; the screenshot timeout that
+    # motivated this restart was on /pinchtab:9999, not any variant.
+    restart_shared_stack "${stack_file}" pinchtab
   else
     show_suite_skip "infra-extended"
   fi
@@ -709,6 +801,9 @@ run_release() {
   # Plugin smoke tests (always run in release suite)
   ran_any=1
   run_plugin || plugin_exit=$?
+
+  unset SHARED_STACK_COMPOSE
+  compose_down "${stack_file}"
 
   echo ""
   if [ "${ran_any}" -eq 0 ]; then

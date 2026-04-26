@@ -186,17 +186,47 @@ start_test "orchestrator: ports, isolation, and cleanup"
 
 ACTIVE_INST_IDS=()
 
-pt_post /instances/start '{"mode":"headless"}'
-assert_ok "launch 1"
-INST1=$(echo "$RESULT" | jq -r '.id')
-PORT1=$(echo "$RESULT" | jq -r '.port')
-ACTIVE_INST_IDS+=("$INST1")
+# Each /instances/start is synchronous (blocks until Chrome is up,
+# ~2-5s). Issue independent launches in parallel via background curl
+# so the test waits for max(launch_time) instead of sum(launch_time).
+parallel_post() {
+  # parallel_post out_file body — fires one POST /instances/start
+  e2e_curl -s -w "\n%{http_code}" \
+    -X POST "${E2E_SERVER}/instances/start" \
+    -H "Content-Type: application/json" \
+    -d "$2" > "$1"
+}
+read_resp() {
+  # read_resp out_file body_var status_var
+  local content
+  content=$(cat "$1")
+  printf -v "$3" '%s' "${content##*$'\n'}"
+  printf -v "$2" '%s' "${content%$'\n'*}"
+}
+record_assertion() {
+  if [[ "$1" =~ ^2 ]]; then
+    echo -e "  ${GREEN}✓${NC} $2 → $1"
+    ((ASSERTIONS_PASSED++)) || true
+  else
+    echo -e "  ${RED}✗${NC} $2 → $1"
+    ((ASSERTIONS_FAILED++)) || true
+  fi
+}
 
-pt_post /instances/start '{"mode":"headless"}'
-assert_ok "launch 2"
-INST2=$(echo "$RESULT" | jq -r '.id')
-PORT2=$(echo "$RESULT" | jq -r '.port')
-ACTIVE_INST_IDS+=("$INST2")
+OUT1=$(mktemp); OUT2=$(mktemp)
+parallel_post "$OUT1" '{"mode":"headless"}' &
+parallel_post "$OUT2" '{"mode":"headless"}' &
+wait
+read_resp "$OUT1" RESP1 CODE1
+read_resp "$OUT2" RESP2 CODE2
+rm -f "$OUT1" "$OUT2"
+record_assertion "$CODE1" "launch 1"
+record_assertion "$CODE2" "launch 2"
+INST1=$(echo "$RESP1" | jq -r '.id')
+PORT1=$(echo "$RESP1" | jq -r '.port')
+INST2=$(echo "$RESP2" | jq -r '.id')
+PORT2=$(echo "$RESP2" | jq -r '.port')
+ACTIVE_INST_IDS+=("$INST1" "$INST2")
 
 if [ "$PORT1" != "$PORT2" ]; then
   echo -e "  ${GREEN}✓${NC} unique ports: $PORT1 vs $PORT2"
@@ -233,13 +263,24 @@ else
   ((ASSERTIONS_FAILED++)) || true
 fi
 
-pt_post "/instances/${INST2}/tabs/open" "{\"url\":\"${FIXTURES_URL}/index.html\"}"
-assert_ok "open tab on second instance"
-TAB1=$(echo "$RESULT" | jq -r '.tabId // .id // empty')
-
-pt_post "/instances/${INST3}/tabs/open" "{\"url\":\"${FIXTURES_URL}/form.html\"}"
-assert_ok "open tab on reused instance"
-TAB2=$(echo "$RESULT" | jq -r '.tabId // .id // empty')
+# Open tabs on independent instances in parallel.
+TAB_OUT1=$(mktemp); TAB_OUT2=$(mktemp)
+e2e_curl -s -w "\n%{http_code}" \
+  -X POST "${E2E_SERVER}/instances/${INST2}/tabs/open" \
+  -H "Content-Type: application/json" \
+  -d "{\"url\":\"${FIXTURES_URL}/index.html\"}" > "$TAB_OUT1" &
+e2e_curl -s -w "\n%{http_code}" \
+  -X POST "${E2E_SERVER}/instances/${INST3}/tabs/open" \
+  -H "Content-Type: application/json" \
+  -d "{\"url\":\"${FIXTURES_URL}/form.html\"}" > "$TAB_OUT2" &
+wait
+read_resp "$TAB_OUT1" TAB_RESP1 TAB_CODE1
+read_resp "$TAB_OUT2" TAB_RESP2 TAB_CODE2
+rm -f "$TAB_OUT1" "$TAB_OUT2"
+record_assertion "$TAB_CODE1" "open tab on second instance"
+record_assertion "$TAB_CODE2" "open tab on reused instance"
+TAB1=$(echo "$TAB_RESP1" | jq -r '.tabId // .id // empty')
+TAB2=$(echo "$TAB_RESP2" | jq -r '.tabId // .id // empty')
 
 if [ -n "$TAB1" ] && [ -n "$TAB2" ] && [ "$TAB1" != "$TAB2" ]; then
   echo -e "  ${GREEN}✓${NC} instances have separate tabs"
@@ -254,9 +295,23 @@ assert_ok "launch cleanup-3"
 INST4=$(echo "$RESULT" | jq -r '.id')
 ACTIVE_INST_IDS+=("$INST4")
 
+# Stop all instances in parallel; the wait_for_instances_gone below
+# already polls for completion, so individual stop responses just need
+# to be 2xx.
+declare -a STOP_OUTS=()
 for id in "${ACTIVE_INST_IDS[@]}"; do
-  pt_post "/instances/${id}/stop" '{}'
-  assert_ok "stop $id"
+  out=$(mktemp)
+  STOP_OUTS+=("$out")
+  e2e_curl -s -w "\n%{http_code}" \
+    -X POST "${E2E_SERVER}/instances/${id}/stop" \
+    -H "Content-Type: application/json" \
+    -d '{}' > "$out" &
+done
+wait
+for i in "${!ACTIVE_INST_IDS[@]}"; do
+  read_resp "${STOP_OUTS[$i]}" _ STOP_CODE
+  record_assertion "$STOP_CODE" "stop ${ACTIVE_INST_IDS[$i]}"
+  rm -f "${STOP_OUTS[$i]}"
 done
 
 wait_for_instances_gone "${E2E_SERVER}" 10 "${ACTIVE_INST_IDS[@]}" || true
