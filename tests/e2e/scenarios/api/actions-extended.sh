@@ -10,7 +10,6 @@ source "${GROUP_DIR}/../../helpers/api-actions.sh"
 start_test "HTTP: dblclick by ref"
 
 pt_post /navigate -d "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
-sleep 1
 
 pt_get /snapshot
 REF=$(echo "$RESULT" | jq -r '[.nodes[] | select(.name == "Increment")][0].ref // empty')
@@ -24,7 +23,6 @@ end_test
 start_test "HTTP: dblclick by CSS selector"
 
 pt_post /navigate -d "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
-sleep 1
 
 pt_post /action -d "{\"kind\":\"dblclick\",\"selector\":\"#increment\"}"
 assert_ok "dblclick by selector"
@@ -35,7 +33,6 @@ end_test
 start_test "HTTP: dblclick by coordinates"
 
 pt_post /navigate -d "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
-sleep 1
 
 pt_post /action -d "{\"kind\":\"dblclick\",\"x\":100,\"y\":100,\"hasXY\":true}"
 assert_ok "dblclick by coordinates"
@@ -46,7 +43,6 @@ end_test
 start_test "CLI: pinchtab dblclick <ref>"
 
 pt_post /navigate -d "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
-sleep 1
 
 pt_get /snapshot
 REF=$(echo "$RESULT" | jq -r '[.nodes[] | select(.name == "Increment")][0].ref // empty')
@@ -60,7 +56,6 @@ end_test
 start_test "CLI: pinchtab dblclick --css <selector>"
 
 pt_post /navigate -d "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
-sleep 1
 
 run_cli dblclick --css "#increment"
 assert_ok "CLI dblclick by selector"
@@ -75,7 +70,6 @@ assert_ok "navigate for new tab"
 TAB_ID=$(echo "$RESULT" | jq -r '.tabId')
 
 pt_post /navigate -d "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
-sleep 1
 
 pt_get /snapshot
 REF=$(echo "$RESULT" | jq -r '[.nodes[] | select(.name == "Increment")][0].ref // empty')
@@ -313,7 +307,6 @@ end_test
 start_test "iframe: srcdoc frame-scoped selectors work"
 
 navigate_fixture "srcdoc-iframe.html"
-sleep 1
 fresh_snapshot
 
 pt_post /frame -d '{"target":"#srcdoc-payment-frame"}'
@@ -382,7 +375,6 @@ end_test
 start_test "iframe: cross-origin selector scope is not claimed as supported"
 
 navigate_fixture "cross-origin-iframe.html"
-sleep 1
 fresh_snapshot
 
 pt_post /frame -d '{"target":"#cross-origin-frame"}'
@@ -409,7 +401,6 @@ E2E_SERVER="http://pinchtab:9999"
 start_test "press Enter: does not type 'Enter' as text"
 
 pt_post /navigate -d "{\"url\":\"${FIXTURES_URL}/form.html\"}"
-sleep 1
 
 pt_post /action -d '{"kind":"type","selector":"#username","text":"testuser"}'
 assert_ok "type into username"
@@ -425,7 +416,6 @@ end_test
 start_test "press Tab: does not type 'Tab' as text"
 
 pt_post /navigate -d "{\"url\":\"${FIXTURES_URL}/form.html\"}"
-sleep 1
 
 pt_post /action -d '{"kind":"click","selector":"#username"}'
 pt_post /action -d '{"kind":"type","selector":"#username","text":"hello"}'
@@ -442,7 +432,6 @@ end_test
 start_test "press Escape: does not type 'Escape' as text"
 
 pt_post /navigate -d "{\"url\":\"${FIXTURES_URL}/form.html\"}"
-sleep 1
 
 pt_post /action -d '{"kind":"type","selector":"#username","text":"world"}'
 assert_ok "type world"
@@ -540,7 +529,6 @@ start_test "POST /dialog: no pending dialog"
 # Navigate to a page that has no dialog
 pt_post /navigate "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
 assert_ok "navigate"
-sleep 0.5
 
 # Try to accept a dialog when none is pending
 pt_post /dialog '{"action":"accept"}'
@@ -593,7 +581,6 @@ start_test "click alert without dialogAction: fast-fail with dialog_blocking err
 
 pt_post /navigate "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
 assert_ok "navigate to buttons"
-sleep 0.5
 
 pt_get /snapshot
 ALERT_REF=$(echo "$RESULT" | jq -r '[.nodes[] | select(.name == "Trigger Alert")][0].ref // empty')
@@ -624,7 +611,6 @@ start_test "click alert with dialogAction accept: dialog dismissed"
 
 pt_post /navigate "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
 assert_ok "navigate to buttons"
-sleep 0.5
 
 pt_get /snapshot
 ALERT_REF=$(echo "$RESULT" | jq -r '[.nodes[] | select(.name == "Trigger Alert")][0].ref // empty')
@@ -644,7 +630,6 @@ start_test "click confirm with dialogAction dismiss: confirm cancelled"
 
 pt_post /navigate "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
 assert_ok "navigate to buttons"
-sleep 0.5
 
 pt_get /snapshot
 CONFIRM_REF=$(echo "$RESULT" | jq -r '[.nodes[] | select(.name == "Trigger Confirm")][0].ref // empty')
@@ -664,7 +649,6 @@ start_test "click confirm with dialogAction accept: confirm accepted"
 
 pt_post /navigate "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
 assert_ok "navigate to buttons"
-sleep 0.5
 
 pt_get /snapshot
 CONFIRM_REF=$(echo "$RESULT" | jq -r '[.nodes[] | select(.name == "Trigger Confirm")][0].ref // empty')
@@ -684,7 +668,6 @@ start_test "click prompt with dialogAction accept and text: prompt value returne
 
 pt_post /navigate "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
 assert_ok "navigate to buttons"
-sleep 0.5
 
 pt_get /snapshot
 PROMPT_REF=$(echo "$RESULT" | jq -r '[.nodes[] | select(.name == "Trigger Prompt")][0].ref // empty')
@@ -704,7 +687,6 @@ start_test "click prompt with dialogAction dismiss: prompt cancelled"
 
 pt_post /navigate "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
 assert_ok "navigate to buttons"
-sleep 0.5
 
 pt_get /snapshot
 PROMPT_REF=$(echo "$RESULT" | jq -r '[.nodes[] | select(.name == "Trigger Prompt")][0].ref // empty')

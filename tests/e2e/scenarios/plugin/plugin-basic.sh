@@ -142,7 +142,6 @@ start_test "plugin: evaluate JavaScript"
 
 pt_post /navigate -d "{\"url\":\"${FIXTURES_URL}/evaluate.html\"}"
 TAB_ID=$(echo "$RESULT" | jq -r '.tabId')
-sleep 1
 
 pt_post /evaluate -d "{\"tabId\":\"${TAB_ID}\",\"expression\":\"document.title\"}"
 assert_ok "evaluate"

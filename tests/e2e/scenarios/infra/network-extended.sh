@@ -12,7 +12,6 @@ source "${GROUP_DIR}/../../helpers/api.sh"
 
 pt_post /navigate "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
 TAB_ID=$(get_tab_id)
-sleep 1
 
 # ─────────────────────────────────────────────────────────────────
 start_test "GET /network/export: default HAR format"
@@ -377,7 +376,6 @@ start_test "GET /network: list entries with filters"
 
 pt_post /navigate "{\"url\":\"${FIXTURES_URL}/index.html\"}"
 NEW_TAB_ID=$(get_tab_id)
-sleep 1
 
 pt_get "/network?tabId=${NEW_TAB_ID}"
 assert_ok "get network entries"
