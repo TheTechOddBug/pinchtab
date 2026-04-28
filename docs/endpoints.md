@@ -407,10 +407,17 @@ POST /errors/clear
 
 Wait body fields:
 
-- one of `selector`, `text`, `url`, `load`, `fn`, or `ms`
+- exactly one of:
+  - `selector` — CSS / XPath (`xpath:` prefix or leading `//`) / text (`text:` prefix)
+  - `text` — substring of `document.body.innerText`
+  - `notText` — wait until substring is no longer present
+  - `url` — glob pattern matched against `window.location.href` (`**`, `*`, `?`)
+  - `load` — one of `load`, `domcontentloaded`, `networkidle`
+  - `fn` — JS expression polled until truthy (requires `security.allowEvaluate`)
+  - `ms` — fixed sleep in milliseconds, max 30000 (escape hatch; prefer condition-based waits)
 - optional `tabId`
-- optional `timeout`
-- optional `state` for selector waits
+- optional `timeout` — ms, default 10000, clamped 100–30000
+- optional `state` for selector waits — `visible` (default) or `hidden`
 
 Network query parameters:
 

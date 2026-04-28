@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 
@@ -231,12 +232,17 @@ func TestHandleWait_SelectorNotBlockedByEvaluateSetting(t *testing.T) {
 }
 
 func TestHandleWait_LoadNoTab(t *testing.T) {
-	h := New(&mockBridge{failTab: true}, &config.RuntimeConfig{}, nil, nil, nil)
-	req := httptest.NewRequest("POST", "/wait", bytes.NewReader([]byte(`{"load":"networkidle"}`)))
-	w := httptest.NewRecorder()
-	h.HandleWait(w, req)
-	if w.Code != 404 {
-		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	for _, state := range []string{"networkidle", "load", "domcontentloaded"} {
+		t.Run(state, func(t *testing.T) {
+			h := New(&mockBridge{failTab: true}, &config.RuntimeConfig{}, nil, nil, nil)
+			body := fmt.Sprintf(`{"load":%q}`, state)
+			req := httptest.NewRequest("POST", "/wait", bytes.NewReader([]byte(body)))
+			w := httptest.NewRecorder()
+			h.HandleWait(w, req)
+			if w.Code != 404 {
+				t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 

@@ -30,7 +30,7 @@ type waitRequest struct {
 	Text     string `json:"text,omitempty"`     // wait for text on page
 	NotText  string `json:"notText,omitempty"`  // wait for text to disappear from page
 	URL      string `json:"url,omitempty"`      // wait for URL glob match
-	Load     string `json:"load,omitempty"`     // "networkidle"
+	Load     string `json:"load,omitempty"`     // "load" | "domcontentloaded" | "networkidle"
 	Fn       string `json:"fn,omitempty"`       // JS expression to poll for truthy
 	Ms       *int   `json:"ms,omitempty"`       // fixed duration wait
 	Timeout  *int   `json:"timeout,omitempty"`  // timeout in ms
@@ -209,13 +209,16 @@ func (h *Handlers) handleWaitCore(w http.ResponseWriter, r *http.Request, req wa
 		js = buildURLMatchJS(req.URL)
 		matchLabel = req.URL
 	case "load":
-		if req.Load == "networkidle" {
+		switch req.Load {
+		case "load", "networkidle":
 			js = `document.readyState === 'complete'`
-			matchLabel = "networkidle"
-		} else {
-			httpx.Error(w, 400, fmt.Errorf("unsupported load state: %s (supported: networkidle)", req.Load))
+		case "domcontentloaded":
+			js = `document.readyState === 'interactive' || document.readyState === 'complete'`
+		default:
+			httpx.Error(w, 400, fmt.Errorf("unsupported load state: %s (supported: load, domcontentloaded, networkidle)", req.Load))
 			return
 		}
+		matchLabel = req.Load
 	case "fn":
 		js = fmt.Sprintf(`!!(function(){try{return %s}catch(e){return false}})()`, req.Fn)
 		matchLabel = "fn"

@@ -302,6 +302,32 @@ assert_json_eq "$RESULT" '.waited' 'false' "waited=false on timeout"
 end_test
 
 # ─────────────────────────────────────────────────────────────────
+start_test "POST /wait: load states (load, domcontentloaded, networkidle)"
+
+pt_post /navigate "{\"url\":\"${FIXTURES_URL}/buttons.html\"}"
+assert_ok "navigate before load-state checks"
+
+# Navigation has already settled, so each state should resolve on the
+# first poll. This exercises the handler's load-state mapping rather
+# than the timing of a fresh page load.
+for state in load domcontentloaded networkidle; do
+  pt_post /wait "{\"load\":\"${state}\",\"timeout\":5000}"
+  assert_ok "wait --load ${state}"
+  assert_json_eq "$RESULT" '.waited' 'true' "waited=true for ${state}"
+  assert_json_eq "$RESULT" '.match' "\"${state}\"" "match label echoes ${state}"
+done
+
+end_test
+
+# ─────────────────────────────────────────────────────────────────
+start_test "POST /wait: rejects unknown load state"
+
+pt_post /wait '{"load":"bogus"}'
+assert_http_status "400" "rejects unknown load state"
+
+end_test
+
+# ─────────────────────────────────────────────────────────────────
 start_test "POST /wait: invalid request (empty body)"
 
 pt_post /wait '{}'
