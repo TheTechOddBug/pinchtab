@@ -28,12 +28,27 @@ const (
 )
 
 // allowedFulfillContentTypes is the explicit safe-list of MIME types that may
-// be used as the Content-Type of a fulfilled (mocked) response. Notably
-// excluded: text/html, application/javascript (and aliases),
-// application/xhtml+xml, image/svg+xml — all of which execute script in the
-// response origin's security context. Allowing those would let an agent (or
-// prompt-injection in the agent's input) run JS in any third-party origin
-// it can navigate the page to call.
+// be used as the Content-Type of a fulfilled (mocked) response.
+//
+// Inclusion criterion: browsers do not execute scripts in this MIME. That is
+// the security property fulfill needs — the response body runs in the
+// response origin's security context, so anything the browser would parse
+// and execute (HTML, JS, XHTML, SVG with embedded <script>, XSLT) becomes a
+// scripted-injection vector in that origin.
+//
+// Implicitly denied (the absences are intentional, not an oversight):
+//   - text/html, application/xhtml+xml — render and run scripts.
+//   - text/javascript, application/javascript, application/x-javascript,
+//     text/ecmascript, application/ecmascript — script files.
+//   - image/svg+xml — SVG can carry inline <script>.
+//   - text/xsl, application/xslt+xml — transform XML into HTML+JS at parse
+//     time (note: application/xml itself is allowed because it does not
+//     trigger XSLT processing on its own).
+//   - application/x-shockwave-flash, application/x-msdownload — historic
+//     auto-execute risk.
+//
+// Expanding this list is a deliberate security decision; do it with review,
+// not as a casual addition.
 var allowedFulfillContentTypes = map[string]struct{}{
 	"application/json":         {},
 	"application/xml":          {},

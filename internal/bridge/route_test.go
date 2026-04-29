@@ -568,6 +568,73 @@ func TestRouteManager_RemoveTab_NoStateNoOp(t *testing.T) {
 	rm.RemoveTab("nonexistent") // must not panic
 }
 
+// Churn test: simulates the lifecycle of many tabs being routed and then
+// closed. After each cycle the manager must hold no per-tab state. This is
+// the test that converts "the cleanup hook is wired" into "we have evidence
+// nothing leaks across hundreds of tab closes."
+func TestRouteManager_RemoveTab_NoLeakAcrossManyTabs(t *testing.T) {
+	rm := NewRouteManager(nil)
+	const cycles = 200
+	for i := 0; i < cycles; i++ {
+		tabID := fmt.Sprintf("tab-%d", i)
+		// Mimic AddRule's effect on state without driving CDP.
+		rm.mu.Lock()
+		rm.perTab[tabID] = &tabRouteState{
+			rules: []RouteRule{
+				{Pattern: "*.png", Action: RouteActionAbort},
+				{Pattern: "api/users", Action: RouteActionFulfill, Body: "{}", Status: 200, ContentType: "application/json"},
+			},
+			listenCancel: func() {},
+		}
+		rm.mu.Unlock()
+		rm.RemoveTab(tabID)
+	}
+	rm.mu.Lock()
+	leaked := len(rm.perTab)
+	rm.mu.Unlock()
+	if leaked != 0 {
+		t.Errorf("expected 0 tabs in perTab after %d open/close cycles, got %d", cycles, leaked)
+	}
+}
+
+// Defends against the "Chrome reused the target id" scenario: rules installed
+// for an ID, the tab closes, then a new tab gets the same ID (chromedp tab
+// IDs are hash-derived from CDP target IDs which can be reused after a
+// process restart). The new tab must see no stale rules, and installing a
+// fresh rule for the reused ID must not commingle with the old state.
+func TestRouteManager_RemoveTab_IDReuseHasFreshState(t *testing.T) {
+	rm := NewRouteManager(nil)
+	cancelCalls := 0
+	const tabID = "tab-reused"
+
+	// First lifetime.
+	rm.mu.Lock()
+	rm.perTab[tabID] = &tabRouteState{
+		rules:        []RouteRule{{Pattern: "old.example", Action: RouteActionAbort}},
+		listenCancel: func() { cancelCalls++ },
+	}
+	rm.mu.Unlock()
+	rm.RemoveTab(tabID)
+	if cancelCalls != 1 {
+		t.Errorf("expected listenCancel to fire once on close, got %d", cancelCalls)
+	}
+	if rules := rm.List(tabID); len(rules) != 0 {
+		t.Errorf("after RemoveTab, List must report 0 rules for the closed tab id (got %d)", len(rules))
+	}
+
+	// Second lifetime (target id reused) — install a different rule, assert
+	// the old rule is gone and only the new one is visible.
+	rm.mu.Lock()
+	rm.perTab[tabID] = &tabRouteState{
+		rules: []RouteRule{{Pattern: "new.example", Action: RouteActionAbort}},
+	}
+	rm.mu.Unlock()
+	rules := rm.List(tabID)
+	if len(rules) != 1 || rules[0].Pattern != "new.example" {
+		t.Errorf("expected only the new rule after id reuse, got %+v", rules)
+	}
+}
+
 func TestRouteManager_AddRule_PerTabCapEnforced(t *testing.T) {
 	rm := NewRouteManager(nil)
 	rm.mu.Lock()
