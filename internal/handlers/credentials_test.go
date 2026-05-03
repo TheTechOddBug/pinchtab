@@ -115,6 +115,36 @@ func TestHandleTabSetCredentials_NoTab(t *testing.T) {
 	}
 }
 
+func TestCredentialStoreListenerDedup(t *testing.T) {
+	cs := newCredentialStore()
+
+	if cs.HasListener("tab1") {
+		t.Fatal("fresh store should have no listeners")
+	}
+
+	cs.MarkListener("tab1")
+	if !cs.HasListener("tab1") {
+		t.Fatal("expected listener after MarkListener")
+	}
+
+	// Mark again — should be idempotent.
+	cs.MarkListener("tab1")
+	if !cs.HasListener("tab1") {
+		t.Fatal("expected listener to persist after second MarkListener")
+	}
+
+	// Delete clears both credentials and listener tracking.
+	cs.Set("tab1", &credentialPair{Username: "u", Password: "p"})
+	cs.Delete("tab1")
+
+	if cs.HasListener("tab1") {
+		t.Fatal("Delete should clear listener tracking")
+	}
+	if _, ok := cs.Get("tab1"); ok {
+		t.Fatal("Delete should clear credentials")
+	}
+}
+
 func TestHandleSetCredentials_EmptyPassword(t *testing.T) {
 	h := New(&mockBridge{}, &config.RuntimeConfig{}, nil, nil, nil)
 

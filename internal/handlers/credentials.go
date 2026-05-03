@@ -20,15 +20,19 @@ type credentialPair struct {
 	Password string
 }
 
-// credentialStore provides thread-safe per-tab credential storage.
+// credentialStore provides thread-safe per-tab credential storage and tracks
+// which tabs already have a CDP event listener installed to avoid stacking
+// duplicate listeners on repeated calls.
 type credentialStore struct {
 	mu          sync.RWMutex
 	credentials map[string]*credentialPair
+	listeners   map[string]bool
 }
 
 func newCredentialStore() *credentialStore {
 	return &credentialStore{
 		credentials: make(map[string]*credentialPair),
+		listeners:   make(map[string]bool),
 	}
 }
 
@@ -49,6 +53,19 @@ func (cs *credentialStore) Delete(tabID string) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	delete(cs.credentials, tabID)
+	delete(cs.listeners, tabID)
+}
+
+func (cs *credentialStore) HasListener(tabID string) bool {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.listeners[tabID]
+}
+
+func (cs *credentialStore) MarkListener(tabID string) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.listeners[tabID] = true
 }
 
 type credentialsRequest struct {
@@ -153,32 +170,35 @@ func (h *Handlers) setCredentials(w http.ResponseWriter, r *http.Request, req cr
 		return
 	}
 
-	// Install event listener for auth challenges and paused requests.
-	// Use the non-timeout tab context so the listener persists beyond this request.
-	chromedp.ListenTarget(ctx, func(ev interface{}) {
-		switch e := ev.(type) {
-		case *fetch.EventAuthRequired:
-			go func() {
-				cred, ok := h.credentialStore.Get(resolvedTabID)
-				if !ok {
-					return
-				}
-				_ = chromedp.Run(ctx, chromedp.ActionFunc(func(innerCtx context.Context) error {
-					return fetch.ContinueWithAuth(e.RequestID, &fetch.AuthChallengeResponse{
-						Response: fetch.AuthChallengeResponseResponseProvideCredentials,
-						Username: cred.Username,
-						Password: cred.Password,
-					}).Do(innerCtx)
-				}))
-			}()
-		case *fetch.EventRequestPaused:
-			go func() {
-				_ = chromedp.Run(ctx, chromedp.ActionFunc(func(innerCtx context.Context) error {
-					return fetch.ContinueRequest(e.RequestID).Do(innerCtx)
-				}))
-			}()
-		}
-	})
+	// Install event listener only once per tab. The listener reads credentials
+	// from the store dynamically, so updating creds doesn't need a new listener.
+	if !h.credentialStore.HasListener(resolvedTabID) {
+		h.credentialStore.MarkListener(resolvedTabID)
+		chromedp.ListenTarget(ctx, func(ev interface{}) {
+			switch e := ev.(type) {
+			case *fetch.EventAuthRequired:
+				go func() {
+					cred, ok := h.credentialStore.Get(resolvedTabID)
+					if !ok {
+						return
+					}
+					_ = chromedp.Run(ctx, chromedp.ActionFunc(func(innerCtx context.Context) error {
+						return fetch.ContinueWithAuth(e.RequestID, &fetch.AuthChallengeResponse{
+							Response: fetch.AuthChallengeResponseResponseProvideCredentials,
+							Username: cred.Username,
+							Password: cred.Password,
+						}).Do(innerCtx)
+					}))
+				}()
+			case *fetch.EventRequestPaused:
+				go func() {
+					_ = chromedp.Run(ctx, chromedp.ActionFunc(func(innerCtx context.Context) error {
+						return fetch.ContinueRequest(e.RequestID).Do(innerCtx)
+					}))
+				}()
+			}
+		})
+	}
 
 	h.recordActivity(r, activity.Update{Action: "emulation.credentials", TabID: resolvedTabID})
 

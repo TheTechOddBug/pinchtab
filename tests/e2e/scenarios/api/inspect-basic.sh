@@ -132,6 +132,42 @@ assert_http_status "400" "missing ref returns 400"
 end_test
 
 # ─────────────────────────────────────────────────────────────────
+start_test "inspect: password field values redacted in snapshot"
+
+# Type a value into the password field so there's something to redact.
+PASS_REF=$(find_ref_by_role_and_name "textbox" "Password:" "$RESULT")
+if [ -z "$PASS_REF" ] || [ "$PASS_REF" = "null" ]; then
+  PASS_REF=$(echo "$RESULT" | jq -r '[.nodes[] | select(.name | test("password";"i")) | .ref] | first // empty')
+fi
+
+if [ -n "$PASS_REF" ] && [ "$PASS_REF" != "null" ]; then
+  pt_post /action "{\"kind\":\"type\",\"ref\":\"${PASS_REF}\",\"text\":\"supersecret\"}"
+
+  # Take a fresh snapshot and check the password field value.
+  pt_get /snapshot
+  assert_ok "snapshot after typing password"
+
+  PASS_VALUE=$(echo "$RESULT" | jq -r "[.nodes[] | select(.ref == \"$PASS_REF\")] | first | .value // empty")
+  if [ "$PASS_VALUE" = "supersecret" ]; then
+    echo -e "  ${RED}✗${NC} password value leaked: $PASS_VALUE"
+    ((ASSERTIONS_FAILED++)) || true
+  elif [ -n "$PASS_VALUE" ] && echo "$PASS_VALUE" | grep -qF "••••••••"; then
+    echo -e "  ${GREEN}✓${NC} password value redacted"
+    ((ASSERTIONS_PASSED++)) || true
+  elif [ -z "$PASS_VALUE" ]; then
+    echo -e "  ${GREEN}✓${NC} password value empty (redacted)"
+    ((ASSERTIONS_PASSED++)) || true
+  else
+    echo -e "  ${RED}✗${NC} unexpected password value: $PASS_VALUE"
+    ((ASSERTIONS_FAILED++)) || true
+  fi
+else
+  echo -e "  ${YELLOW}⚠${NC} skipped: could not find password field ref"
+fi
+
+end_test
+
+# ─────────────────────────────────────────────────────────────────
 start_test "inspect: DELETE /cookies clears cookies"
 
 pt_delete /cookies
