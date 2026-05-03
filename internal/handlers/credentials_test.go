@@ -118,27 +118,21 @@ func TestHandleTabSetCredentials_NoTab(t *testing.T) {
 func TestCredentialStoreListenerDedup(t *testing.T) {
 	cs := newCredentialStore()
 
-	if cs.HasListener("tab1") {
-		t.Fatal("fresh store should have no listeners")
+	if !cs.MarkListenerIfAbsent("tab1") {
+		t.Fatal("first MarkListenerIfAbsent should return true")
 	}
 
-	cs.MarkListener("tab1")
-	if !cs.HasListener("tab1") {
-		t.Fatal("expected listener after MarkListener")
+	if cs.MarkListenerIfAbsent("tab1") {
+		t.Fatal("second MarkListenerIfAbsent should return false")
 	}
 
-	// Mark again — should be idempotent.
-	cs.MarkListener("tab1")
-	if !cs.HasListener("tab1") {
-		t.Fatal("expected listener to persist after second MarkListener")
-	}
-
-	// Delete clears both credentials and listener tracking.
+	// Delete clears credentials but preserves listener tracking, because the
+	// chromedp listener is bound to the tab context and survives clear/re-set.
 	cs.Set("tab1", &credentialPair{Username: "u", Password: "p"})
 	cs.Delete("tab1")
 
-	if cs.HasListener("tab1") {
-		t.Fatal("Delete should clear listener tracking")
+	if cs.MarkListenerIfAbsent("tab1") {
+		t.Fatal("MarkListenerIfAbsent should return false after Delete (listener persists)")
 	}
 	if _, ok := cs.Get("tab1"); ok {
 		t.Fatal("Delete should clear credentials")

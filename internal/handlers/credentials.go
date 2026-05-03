@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -53,19 +54,21 @@ func (cs *credentialStore) Delete(tabID string) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	delete(cs.credentials, tabID)
-	delete(cs.listeners, tabID)
+	// Keep listeners[tabID] — the chromedp listener is bound to the tab's
+	// context and survives across clear/re-set cycles. Clearing the flag
+	// here would cause a second listener to be installed on re-set.
 }
 
-func (cs *credentialStore) HasListener(tabID string) bool {
-	cs.mu.RLock()
-	defer cs.mu.RUnlock()
-	return cs.listeners[tabID]
-}
-
-func (cs *credentialStore) MarkListener(tabID string) {
+// MarkListenerIfAbsent atomically marks a listener as installed for tabID.
+// Returns true if this call was the one that set it (i.e., no listener existed).
+func (cs *credentialStore) MarkListenerIfAbsent(tabID string) bool {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	if cs.listeners[tabID] {
+		return false
+	}
 	cs.listeners[tabID] = true
+	return true
 }
 
 type credentialsRequest struct {
@@ -172,8 +175,7 @@ func (h *Handlers) setCredentials(w http.ResponseWriter, r *http.Request, req cr
 
 	// Install event listener only once per tab. The listener reads credentials
 	// from the store dynamically, so updating creds doesn't need a new listener.
-	if !h.credentialStore.HasListener(resolvedTabID) {
-		h.credentialStore.MarkListener(resolvedTabID)
+	if h.credentialStore.MarkListenerIfAbsent(resolvedTabID) {
 		chromedp.ListenTarget(ctx, func(ev interface{}) {
 			switch e := ev.(type) {
 			case *fetch.EventAuthRequired:
@@ -182,19 +184,23 @@ func (h *Handlers) setCredentials(w http.ResponseWriter, r *http.Request, req cr
 					if !ok {
 						return
 					}
-					_ = chromedp.Run(ctx, chromedp.ActionFunc(func(innerCtx context.Context) error {
+					if err := chromedp.Run(ctx, chromedp.ActionFunc(func(innerCtx context.Context) error {
 						return fetch.ContinueWithAuth(e.RequestID, &fetch.AuthChallengeResponse{
 							Response: fetch.AuthChallengeResponseResponseProvideCredentials,
 							Username: cred.Username,
 							Password: cred.Password,
 						}).Do(innerCtx)
-					}))
+					})); err != nil {
+						slog.Warn("credentials: ContinueWithAuth failed", "tab", resolvedTabID, "err", err)
+					}
 				}()
 			case *fetch.EventRequestPaused:
 				go func() {
-					_ = chromedp.Run(ctx, chromedp.ActionFunc(func(innerCtx context.Context) error {
+					if err := chromedp.Run(ctx, chromedp.ActionFunc(func(innerCtx context.Context) error {
 						return fetch.ContinueRequest(e.RequestID).Do(innerCtx)
-					}))
+					})); err != nil {
+						slog.Warn("credentials: ContinueRequest failed", "tab", resolvedTabID, "err", err)
+					}
 				}()
 			}
 		})
